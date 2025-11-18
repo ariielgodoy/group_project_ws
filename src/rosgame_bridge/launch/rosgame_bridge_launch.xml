@@ -1,0 +1,8 @@
+<launch>
+  <node pkg="rosgame_bridge" exec="bridge" name="rosgame_bridge"/>
+  
+  <node pkg="rosgame_players" exec="elusive_player" name="elusive_player_1"/>
+  <node pkg="rosgame_players" exec="elusive_player" name="elusive_player_2"/>
+  <node pkg="rosgame_players" exec="elusive_player" name="elusive_player_3"/>
+  
+</launch>

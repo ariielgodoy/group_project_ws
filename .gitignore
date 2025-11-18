@@ -1,0 +1,35 @@
+# === ROS 2 workspace junk ===
+build/
+install/
+log/
+
+# Colcon
+*.log
+colcon_cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# CLion / JetBrains
+.idea/
+
+# CMake junk
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Launch logs
+*.launch.py~ 
+
+# Backup files
+*~
+*.swp
+*.swo
+
+# Linux hidden junk
+.DS_Store
