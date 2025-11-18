@@ -64,6 +64,25 @@ Warrior::~Warrior()
      RCLCPP_ERROR(this->get_logger(), "Game over for [%s]", warrior_nick.c_str());
 }
 
+float Warrior::euclidean_distance_to_coins()
+{
+    float distance = 0;
+    //skills_pos_array; En este array estaria bien saber si esta ordenado o no y como nos vienen esas posiciones
+    //Es decir, si vienen en formato de distancia o en formato de x e y
+
+    //Al tener la distancia euclidea y el angulo, ya podriamos saber si el robot esta realmente alineado con la recta que
+    // une el robot con la moneda y podriamos computar la velocidad
+
+    return distance;
+}
+
+void Warrior::perform_movement(bool obstacle_front, bool obstacle_left, bool obstacle_right)
+{
+    float distance = this->euclidean_distance_to_coins(); //Para calcular la velocidad si esta cerca o lejos
+
+}
+
+
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
     //Reutilizacion de programa de procesamiento de laser de la navegacion reactiva
@@ -85,7 +104,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     double left_sweep_end = left_laser + sweep;
 
     double front_sweep_start = front_laser - sweep;
-    double front_sweep_end = front_laser+ sweep;
+    double front_sweep_end = front_laser + sweep;
 
     double right_sweep_start = right_laser - sweep;
     double right_sweep_end = right_laser + sweep;
@@ -94,7 +113,6 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     bool obstacle_front = false;
     bool obstacle_left = false;
     bool obstacle_right = false;
-    bool search_wall = true;
     double front_distance = msg->range_max;
 
 
@@ -122,12 +140,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             obstacle_right = true;
             //RCLCPP_INFO(this->get_logger(), "DERECHA");
         }
-        if(msg->ranges[k]<msg->range_max-0.1){
-            search_wall = false;
-        }
     }
 
-
+    this->perform_movement(obstacle_front, obstacle_left, obstacle_right);
 
 }
 
