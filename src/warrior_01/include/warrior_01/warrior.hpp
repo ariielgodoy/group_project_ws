@@ -26,7 +26,7 @@ public:
 
     void perform_movement(bool obstacle_front, bool obstacle_left, bool obstacle_right);
 
-    float euclidean_distance_to_coins();
+    float euclidean_distance_and_angle_to_coins();
     
     //puedes añadir mas funciones si lo crees oportuno
 

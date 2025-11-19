@@ -64,21 +64,43 @@ Warrior::~Warrior()
      RCLCPP_ERROR(this->get_logger(), "Game over for [%s]", warrior_nick.c_str());
 }
 
-float Warrior::euclidean_distance_to_coins()
+float Warrior::euclidean_distance_and_angle_to_coins()
 {
-    float distance = 0;
+    float closest_distance = 500;
+    float angle;
     //skills_pos_array; En este array estaria bien saber si esta ordenado o no y como nos vienen esas posiciones
     //Es decir, si vienen en formato de distancia o en formato de x e y
 
     //Al tener la distancia euclidea y el angulo, ya podriamos saber si el robot esta realmente alineado con la recta que
     // une el robot con la moneda y podriamos computar la velocidad
+    size_t i = 0;
+    std::vector<float> distances;
+    for (const auto &skill_pos : skills_pos_array)
+    {
+        float x = skill_pos[0];
+        float y = skill_pos[1];
 
-    return distance;
+        float euclidean_distance = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+        distances[i] = euclidean_distance;
+        i++;
+    }
+
+    for(int j; j < distances.size() - 1; j++){
+        if(closest_distance>distances[j])
+        {
+            closest_distance = distances[j];
+            float x_for_the_angle = skills_pos_array[j][0] - pos_x;
+            float y_for_the_angle = skills_pos_array[j][1] - pos_y;
+
+            angle = atan2(y_for_the_angle, x_for_the_angle);
+        }
+    }
+    return closest_distance, angle;
 }
 
 void Warrior::perform_movement(bool obstacle_front, bool obstacle_left, bool obstacle_right)
 {
-    float distance = this->euclidean_distance_to_coins(); //Para calcular la velocidad si esta cerca o lejos
+    float closest_distance_to_coin, angle_to_coin = this->euclidean_distance_and_angle_to_coins(); //Para calcular la velocidad si esta cerca o lejos
 
 }
 
