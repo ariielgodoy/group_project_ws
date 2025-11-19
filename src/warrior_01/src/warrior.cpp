@@ -170,7 +170,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
 
     // Se obtienen las posiciones de bloques de habilidades de la clave "Skills_Positions" en el campo "FOV".
     std::vector<std::vector<float>> skills_pos_array_aux;
-    const Json::Value &skills_pos = JsonSceneData["FOV"]["Skills_Positions"];
+    const Json::Value &skills_pos = JsonSceneData["FOV"]["Coins_Positions"];
     for (const Json::Value &skill : skills_pos)
     {
         std::vector<float> skillData;
@@ -207,7 +207,13 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
         players_pos_array_aux.push_back(playerData);
     }
     players_pos_array = players_pos_array_aux;
-    
+    RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
+    if (!skills_pos_array.empty())
+    {
+        RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
+        for (const auto &skill_pos : skills_pos_array)
+        {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
+    }
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
