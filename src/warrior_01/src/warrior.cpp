@@ -80,72 +80,76 @@ float Warrior::euclidean_distance_and_angle_to_coins()
     // une el robot con la moneda y podriamos computar la velocidad
     size_t i = 0;
     std::vector<float> distances_coins;
+    RCLCPP_INFO(this->get_logger(), "Is skills_pos_array empty? %s", skills_pos_array.empty() ? "Yes" : "No");
+
+    if (!skills_pos_array.empty()) {
+        for (const auto &skill_pos : skills_pos_array)  
+        {
+            float x = skill_pos[0];
+            float y = skill_pos[1];
+
+            float euclidean_distance_coins = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+            distances_coins.push_back(euclidean_distance_coins); //No hace falta usar el contador para acceder a las posiciones
+            //Y no va a haber el problema del overflow que habia antes
+        }
     
-    for (const auto &skill_pos : skills_pos_array)
-    {
-        float x = skill_pos[0];
-        float y = skill_pos[1];
 
-        float euclidean_distance_coins = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
-        distances_coins[i] = euclidean_distance_coins;
-        i++;
-    }
+        for(int j; j < distances_coins.size() - 1; j++){
+            if(closest_distance_coins>distances_coins[j])
+            {
+                closest_distance_coins = distances_coins[j];
+                float x_for_the_angle_coins = skills_pos_array[j][0] - pos_x;
+                float y_for_the_angle_coins = skills_pos_array[j][1] - pos_y;
 
-    for(int j; j < distances_coins.size() - 1; j++){
-        if(closest_distance_coins>distances_coins[j])
+                angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
+            }
+        }
+
+        //Bateria
+        size_t k = 0;
+        std::vector<float> distances_battery;
+
+        for (const auto &skill_pos_battery : chargers_pos_array)
         {
-            closest_distance_coins = distances_coins[j];
-            float x_for_the_angle_coins = skills_pos_array[j][0] - pos_x;
-            float y_for_the_angle_coins = skills_pos_array[j][1] - pos_y;
+            float x = skill_pos_battery[0];
+            float y = skill_pos_battery[1];
 
-            angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
+            float euclidean_distance_battery = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+            distances_battery.push_back(euclidean_distance_battery);
+        }
+
+        for(int j; j < distances_battery.size() - 1; j++){
+            if(closest_distance_battery>distances_battery[j])
+            {
+                closest_distance_battery = distances_battery[j];
+                float x_for_the_angle_battery = chargers_pos_array[j][0] - pos_x;
+                float y_for_the_angle_battery = chargers_pos_array[j][1] - pos_y;
+
+                angle_battery = atan2(y_for_the_angle_battery, x_for_the_angle_battery);
+            }
+        }
+        closest_distance=closest_distance_coins;
+        angle=angle_coins;
+        if(battery<50 and angle_battery<120){
+            if(closest_distance_battery<closest_distance_coins){
+                closest_distance=closest_distance_battery;
+                angle=angle_battery;
+            }
+        }
+
+        //Comparison with robots angle
+
+        if(gamma < angle + 0.09){
+            below = 1;
+            close_enough = 0;
+        }else if (gamma > angle - 0.09){
+            below = 0;
+            close_enough = 0;
+        }else{
+            close_enough = 1;
         }
     }
-
-    //Bateria
-    size_t k = 0;
-    std::vector<float> distances_battery;
-
-    for (const auto &skill_pos_battery : chargers_pos_array)
-    {
-        float x = skill_pos_battery[0];
-        float y = skill_pos_battery[1];
-
-        float euclidean_distance_battery = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
-        distances_battery[k] = euclidean_distance_battery;
-        k++;
-    }
-
-    for(int j; j < distances_battery.size() - 1; j++){
-        if(closest_distance_battery>distances_battery[j])
-        {
-            closest_distance_battery = distances_battery[j];
-            float x_for_the_angle_battery = chargers_pos_array[j][0] - pos_x;
-            float y_for_the_angle_battery = chargers_pos_array[j][1] - pos_y;
-
-            angle_battery = atan2(y_for_the_angle_battery, x_for_the_angle_battery);
-        }
-    }
-    closest_distance=closest_distance_coins;
-    angle=angle_coins;
-    if(battery<50 and angle_battery<120){
-        if(closest_distance_battery<closest_distance_coins){
-            closest_distance=closest_distance_battery;
-            angle=angle_battery;
-        }
-    }
-
-    //Comparison with robots angle
-
-    if(gamma < angle + 0.09){
-        below = 1;
-        close_enough = 0;
-    }else if (gamma > angle - 0.09){
-        below = 0;
-        close_enough = 0;
-    }else{
-        close_enough = 1;
-    }
+    RCLCPP_INFO(this->get_logger(), "Closest distance: %f", closest_distance);
     return closest_distance, below, close_enough;
 }
 
@@ -157,7 +161,12 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
     rosgame_msgs::msg::RosgameTwist movement;
 
     // Valor por defecto
-    movement.vel.linear.x = closest_distance_to_skill / 5.0;
+    //RCLCPP_INFO(this->get_logger(), "%f", closest_distance_to_skill);
+    movement.vel.linear.x = 0.3;
+    if(closest_distance_to_skill>1){
+        movement.vel.linear.x = closest_distance_to_skill/1.2;
+    }
+    
 
     // Reglas de giro
     if (obstacle_front && obstacle_right) {
@@ -169,11 +178,11 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
         movement.vel.angular.z = -0.7;
     }
     else if (obstacle_front) {
-        movement.vel.linear.x = front_distance / 8.0;
+        movement.vel.linear.x = front_distance / 2.0;
         movement.vel.angular.z = -0.7;
     }
 
-    //movement.code = code;
+    movement.code = code;
 
     // Publicar
     this->pub1_->publish(movement);
@@ -216,7 +225,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Aqui busco los obstaculos por la izquierda
     for(int i = left_sweep_start; i < left_sweep_end; i++){
-        if(msg->ranges[i] < 2){
+        if(msg->ranges[i] < 3){
             obstacle_left = true;
             //RCLCPP_INFO(this->get_logger(), "IZQUIERDA");
         }
@@ -224,7 +233,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Aqui busco los obstaculos de delante
     for(int j = front_sweep_start; j < front_sweep_end; j++){
-        if(msg->ranges[j] < 2){
+        if(msg->ranges[j] < 3){
             obstacle_front = true;
             if(front_distance > msg->ranges[j]){
                 front_distance = msg->ranges[j];
@@ -234,7 +243,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Aqui busco los obstaculos de la derecha
     for(int k = right_sweep_start; k < right_sweep_end; k++){
-        if(msg->ranges[k] < 2){
+        if(msg->ranges[k] < 3){
             obstacle_right = true;
             //RCLCPP_INFO(this->get_logger(), "DERECHA");
         }
@@ -305,7 +314,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
         players_pos_array_aux.push_back(playerData);
     }
     players_pos_array = players_pos_array_aux;
-    RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
+    //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
     if (!skills_pos_array.empty())
     {
         RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
