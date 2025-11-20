@@ -66,41 +66,117 @@ Warrior::~Warrior()
 
 float Warrior::euclidean_distance_and_angle_to_coins()
 {
-    float closest_distance = 500;
+    float closest_distance;
     float angle;
+    float closest_distance_coins = 500;
+    float angle_coins;
+    float closest_distance_battery = 500;
+    float angle_battery;
+    bool below, close_enough;
     //skills_pos_array; En este array estaria bien saber si esta ordenado o no y como nos vienen esas posiciones
     //Es decir, si vienen en formato de distancia o en formato de x e y
 
     //Al tener la distancia euclidea y el angulo, ya podriamos saber si el robot esta realmente alineado con la recta que
     // une el robot con la moneda y podriamos computar la velocidad
     size_t i = 0;
-    std::vector<float> distances;
+    std::vector<float> distances_coins;
+    
     for (const auto &skill_pos : skills_pos_array)
     {
         float x = skill_pos[0];
         float y = skill_pos[1];
 
-        float euclidean_distance = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
-        distances[i] = euclidean_distance;
+        float euclidean_distance_coins = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+        distances_coins[i] = euclidean_distance_coins;
         i++;
     }
 
-    for(int j; j < distances.size() - 1; j++){
-        if(closest_distance>distances[j])
+    for(int j; j < distances_coins.size() - 1; j++){
+        if(closest_distance_coins>distances_coins[j])
         {
-            closest_distance = distances[j];
-            float x_for_the_angle = skills_pos_array[j][0] - pos_x;
-            float y_for_the_angle = skills_pos_array[j][1] - pos_y;
+            closest_distance_coins = distances_coins[j];
+            float x_for_the_angle_coins = skills_pos_array[j][0] - pos_x;
+            float y_for_the_angle_coins = skills_pos_array[j][1] - pos_y;
 
-            angle = atan2(y_for_the_angle, x_for_the_angle);
+            angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
         }
     }
-    return closest_distance, angle;
+
+    //Bateria
+    size_t k = 0;
+    std::vector<float> distances_battery;
+
+    for (const auto &skill_pos_battery : chargers_pos_array)
+    {
+        float x = skill_pos_battery[0];
+        float y = skill_pos_battery[1];
+
+        float euclidean_distance_battery = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+        distances_battery[k] = euclidean_distance_battery;
+        k++;
+    }
+
+    for(int j; j < distances_battery.size() - 1; j++){
+        if(closest_distance_battery>distances_battery[j])
+        {
+            closest_distance_battery = distances_battery[j];
+            float x_for_the_angle_battery = chargers_pos_array[j][0] - pos_x;
+            float y_for_the_angle_battery = chargers_pos_array[j][1] - pos_y;
+
+            angle_battery = atan2(y_for_the_angle_battery, x_for_the_angle_battery);
+        }
+    }
+    closest_distance=closest_distance_coins;
+    angle=angle_coins;
+    if(battery<50 and angle_battery<120){
+        if(closest_distance_battery<closest_distance_coins){
+            closest_distance=closest_distance_battery;
+            angle=angle_battery;
+        }
+    }
+
+    //Comparison with robots angle
+
+    if(gamma < angle + 0.09){
+        below = 1;
+        close_enough = 0;
+    }else if (gamma > angle - 0.09){
+        below = 0;
+        close_enough = 0;
+    }else{
+        close_enough = 1;
+    }
+    return closest_distance, below, close_enough;
 }
 
-void Warrior::perform_movement(bool obstacle_front, bool obstacle_left, bool obstacle_right)
+void Warrior::perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right)
 {
-    float closest_distance_to_coin, angle_to_coin = this->euclidean_distance_and_angle_to_coins(); //Para calcular la velocidad si esta cerca o lejos
+    float closest_distance_to_skill, below, close_enough = this->euclidean_distance_and_angle_to_coins(); //Para calcular la velocidad si esta cerca o lejos
+    
+
+    rosgame_msgs::msg::RosgameTwist movement;
+
+    // Valor por defecto
+    movement.vel.linear.x = closest_distance_to_skill / 5.0;
+
+    // Reglas de giro
+    if (obstacle_front && obstacle_right) {
+        movement.vel.linear.x = 0.2;
+        movement.vel.angular.z = 0.7;
+    }
+    else if (obstacle_front && obstacle_left) {
+        movement.vel.linear.x = 0.2;
+        movement.vel.angular.z = -0.7;
+    }
+    else if (obstacle_front) {
+        movement.vel.linear.x = front_distance / 8.0;
+        movement.vel.angular.z = -0.7;
+    }
+
+    //movement.code = code;
+
+    // Publicar
+    this->pub1_->publish(movement);
 
 }
 
@@ -164,7 +240,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         }
     }
 
-    this->perform_movement(obstacle_front, obstacle_left, obstacle_right);
+    this->perform_movement(front_distance, obstacle_front, obstacle_left, obstacle_right);
 
 }
 

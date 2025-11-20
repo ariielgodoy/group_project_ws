@@ -24,7 +24,7 @@ public:
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);
 
-    void perform_movement(bool obstacle_front, bool obstacle_left, bool obstacle_right);
+    void perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right);
 
     float euclidean_distance_and_angle_to_coins();
     
