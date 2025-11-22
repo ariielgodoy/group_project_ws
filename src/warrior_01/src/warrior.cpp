@@ -64,196 +64,6 @@ Warrior::~Warrior()
      RCLCPP_ERROR(this->get_logger(), "Game over for [%s]", warrior_nick.c_str());
 }
 
-float Warrior::euclidean_distance_and_angle_to_coins()
-{
-    float closest_distance;
-    float angle;
-    float closest_distance_coins = 500;
-    float angle_coins;
-    float closest_distance_battery = 500;
-    float angle_battery;
-    bool below, close_enough;
-    //skills_pos_array; En este array estaria bien saber si esta ordenado o no y como nos vienen esas posiciones
-    //Es decir, si vienen en formato de distancia o en formato de x e y
-
-    //Al tener la distancia euclidea y el angulo, ya podriamos saber si el robot esta realmente alineado con la recta que
-    // une el robot con la moneda y podriamos computar la velocidad
-    size_t i = 0;
-    std::vector<float> distances_coins;
-    RCLCPP_INFO(this->get_logger(), "Is skills_pos_array empty? %s", skills_pos_array.empty() ? "Yes" : "No");
-
-    if (!skills_pos_array.empty()) {
-        for (const auto &skill_pos : skills_pos_array)  
-        {
-            float x = skill_pos[0];
-            float y = skill_pos[1];
-
-            float euclidean_distance_coins = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
-            distances_coins.push_back(euclidean_distance_coins); //No hace falta usar el contador para acceder a las posiciones
-            //Y no va a haber el problema del overflow que habia antes
-        }
-    
-
-        for(int j; j < distances_coins.size() - 1; j++){
-            if(closest_distance_coins>distances_coins[j])
-            {
-                closest_distance_coins = distances_coins[j];
-                float x_for_the_angle_coins = skills_pos_array[j][0] - pos_x;
-                float y_for_the_angle_coins = skills_pos_array[j][1] - pos_y;
-
-                angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
-            }
-        }
-
-        //Bateria
-        size_t k = 0;
-        std::vector<float> distances_battery;
-
-        for (const auto &skill_pos_battery : chargers_pos_array)
-        {
-            float x = skill_pos_battery[0];
-            float y = skill_pos_battery[1];
-
-            float euclidean_distance_battery = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
-            distances_battery.push_back(euclidean_distance_battery);
-        }
-
-        for(int j; j < distances_battery.size() - 1; j++){
-            if(closest_distance_battery>distances_battery[j])
-            {
-                closest_distance_battery = distances_battery[j];
-                float x_for_the_angle_battery = chargers_pos_array[j][0] - pos_x;
-                float y_for_the_angle_battery = chargers_pos_array[j][1] - pos_y;
-
-                angle_battery = atan2(y_for_the_angle_battery, x_for_the_angle_battery);
-            }
-        }
-        closest_distance=closest_distance_coins;
-        angle=angle_coins;
-        if(battery<50 and angle_battery<120){
-            if(closest_distance_battery<closest_distance_coins){
-                closest_distance=closest_distance_battery;
-                angle=angle_battery;
-            }
-        }
-
-        //Comparison with robots angle
-
-        if(gamma < angle + 0.09){
-            below = 1;
-            close_enough = 0;
-        }else if (gamma > angle - 0.09){
-            below = 0;
-            close_enough = 0;
-        }else{
-            close_enough = 1;
-        }
-    }
-    RCLCPP_INFO(this->get_logger(), "Closest distance: %f", closest_distance);
-    return closest_distance, below, close_enough;
-}
-
-void Warrior::perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right)
-{
-    float closest_distance_to_skill, below, close_enough = this->euclidean_distance_and_angle_to_coins(); //Para calcular la velocidad si esta cerca o lejos
-    
-
-    rosgame_msgs::msg::RosgameTwist movement;
-
-    // Valor por defecto
-    //RCLCPP_INFO(this->get_logger(), "%f", closest_distance_to_skill);
-    movement.vel.linear.x = 0.3;
-    if(closest_distance_to_skill>1){
-        movement.vel.linear.x = closest_distance_to_skill/1.2;
-    }
-    
-
-    // Reglas de giro
-    if (obstacle_front && obstacle_right) {
-        movement.vel.linear.x = 0.2;
-        movement.vel.angular.z = 0.7;
-    }
-    else if (obstacle_front && obstacle_left) {
-        movement.vel.linear.x = 0.2;
-        movement.vel.angular.z = -0.7;
-    }
-    else if (obstacle_front) {
-        movement.vel.linear.x = front_distance / 2.0;
-        movement.vel.angular.z = -0.7;
-    }
-
-    movement.code = code;
-
-    // Publicar
-    this->pub1_->publish(movement);
-
-}
-
-
-void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
-{
-    //Reutilizacion de programa de procesamiento de laser de la navegacion reactiva
-
-    int array_size = msg->ranges.size();
-    //double angle_min = msg->angle_min; //= 
-    double angle_max = msg->angle_max; //= 
-    double angle_increment = msg->angle_increment;
-
-    int positions_to_look_sideways = (angle_max-M_PI/2)/angle_increment;
-    int left_laser = array_size - 1 - positions_to_look_sideways;
-    int right_laser = positions_to_look_sideways;
-    int front_laser = array_size/2;
-    int sweep = 0.384/angle_increment; //~=22 grados pasados a
-    //posiciones de array, ademas uso int para truncar el calculo
-
-    //Parametros para los bucles
-    double left_sweep_start = left_laser - sweep;
-    double left_sweep_end = left_laser + sweep;
-
-    double front_sweep_start = front_laser - sweep;
-    double front_sweep_end = front_laser + sweep;
-
-    double right_sweep_start = right_laser - sweep;
-    double right_sweep_end = right_laser + sweep;
-
-    //Flags para el programa de movimiento
-    bool obstacle_front = false;
-    bool obstacle_left = false;
-    bool obstacle_right = false;
-    double front_distance = msg->range_max;
-
-
-    //Aqui busco los obstaculos por la izquierda
-    for(int i = left_sweep_start; i < left_sweep_end; i++){
-        if(msg->ranges[i] < 3){
-            obstacle_left = true;
-            //RCLCPP_INFO(this->get_logger(), "IZQUIERDA");
-        }
-    }
-
-    //Aqui busco los obstaculos de delante
-    for(int j = front_sweep_start; j < front_sweep_end; j++){
-        if(msg->ranges[j] < 3){
-            obstacle_front = true;
-            if(front_distance > msg->ranges[j]){
-                front_distance = msg->ranges[j];
-            }
-        }
-    }
-
-    //Aqui busco los obstaculos de la derecha
-    for(int k = right_sweep_start; k < right_sweep_end; k++){
-        if(msg->ranges[k] < 3){
-            obstacle_right = true;
-            //RCLCPP_INFO(this->get_logger(), "DERECHA");
-        }
-    }
-
-    this->perform_movement(front_distance, obstacle_front, obstacle_left, obstacle_right);
-
-}
-
-
 void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
 {
     // Se convierte el msg de tipo string con formato en un JSON.
@@ -315,12 +125,12 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     }
     players_pos_array = players_pos_array_aux;
     //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-    if (!skills_pos_array.empty())
+    /*if (!skills_pos_array.empty())
     {
         RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
         for (const auto &skill_pos : skills_pos_array)
         {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
-    }
+    }*/
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
@@ -341,5 +151,250 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     RCLCPP_INFO(this->get_logger(), "Robot Pose: [X] = '%f', [Y] = '%f', [GAMMA] = '%f'", pos_x, pos_y, gamma);
     */
 }
+
+std::vector<float> Warrior::euclidean_distance_and_angle_to_coins()
+{
+    float closest_distance;
+    float angle = 0;
+    float closest_distance_coins = 500;
+    float angle_coins;
+    float closest_distance_battery = 500;
+    float angle_battery;
+    float below = 0;
+    float close_enough = 0;
+    std::vector<float> datos;
+    //skills_pos_array; En este array estaria bien saber si esta ordenado o no y como nos vienen esas posiciones
+    //Es decir, si vienen en formato de distancia o en formato de x e y
+
+    //Al tener la distancia euclidea y el angulo, ya podriamos saber si el robot esta realmente alineado con la recta que
+    // une el robot con la moneda y podriamos computar la velocidad
+    std::vector<float> distances_coins;
+
+    if (!skills_pos_array.empty()) {
+        for (const auto &skill_pos : skills_pos_array)  
+        {
+            float x = skill_pos[0];
+            float y = skill_pos[1];
+
+            float euclidean_distance_coins = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+            distances_coins.push_back(euclidean_distance_coins); //No hace falta usar el contador para acceder a las posiciones
+            //Y no va a haber el problema del overflow que habia antes
+        }
+    
+
+        for(int j = 0; j < distances_coins.size(); j++){
+            if(closest_distance_coins>distances_coins[j])
+            {
+                closest_distance_coins = distances_coins[j];
+                float x_for_the_angle_coins = skills_pos_array[j][0] - pos_x;
+                float y_for_the_angle_coins = skills_pos_array[j][1] - pos_y;
+
+                angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
+            }
+        }
+
+        //Bateria
+        std::vector<float> distances_battery;
+
+        for (const auto &skill_pos_battery : chargers_pos_array)
+        {
+            float x = skill_pos_battery[0];
+            float y = skill_pos_battery[1];
+
+            float euclidean_distance_battery = sqrt((x-pos_x)*(x-pos_x) + (y-pos_y)*(y-pos_y));
+            distances_battery.push_back(euclidean_distance_battery);
+        }
+
+        for(int i = 0; i < distances_battery.size(); i++){
+            if(closest_distance_battery>distances_battery[i])
+            {
+                closest_distance_battery = distances_battery[i];
+                float x_for_the_angle_battery = chargers_pos_array[i][0] - pos_x;
+                float y_for_the_angle_battery = chargers_pos_array[i][1] - pos_y;
+
+                angle_battery = atan2(y_for_the_angle_battery, x_for_the_angle_battery);
+            }
+        }
+        closest_distance=closest_distance_coins;
+        angle=angle_coins;
+        if(battery<30){
+            if(closest_distance_battery<closest_distance_coins){
+                closest_distance=closest_distance_battery;
+                angle=angle_battery;
+                RCLCPP_INFO(this->get_logger(), "Go to a battery");
+            }
+        }
+        else{
+            RCLCPP_INFO(this->get_logger(), "Go to a coin");
+        }
+
+        //Comparison with robots angle
+
+        if(gamma < angle - 0.12){
+            below = 1;
+            close_enough = 0;
+        }else if (gamma > angle + 0.12){//0.09
+            below = 0;
+            close_enough = 0;
+        }else{
+            close_enough = 1;
+        }
+
+
+        if((gamma > M_PI/2 && angle < M_PI/2) or (angle > M_PI/2 && gamma < M_PI/2)){
+            if(gamma < angle - 0.12){
+                below = 0;
+                close_enough = 0;
+            }else if (gamma > angle + 0.12){//0.09
+                below = 1;
+                close_enough = 0;
+            }else{
+                close_enough = 1;
+            }
+        }
+        
+    }
+    RCLCPP_INFO(this->get_logger(), "Gamma: %f, Angle: %f", gamma, angle);
+    datos.push_back(closest_distance);
+    datos.push_back(below);
+    datos.push_back(close_enough);
+    return datos; // Below = 1 es que esta por debajo de la direccion y Below = 0 por encima
+}
+
+void Warrior::perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right)
+{
+    std::vector<float> datos = this->euclidean_distance_and_angle_to_coins(); //Para calcular la velocidad si esta cerca o lejos
+    float closest_distance_to_skill = datos[0];
+    float below = datos[1];
+    float close_enough = datos[2];
+
+    rosgame_msgs::msg::RosgameTwist movement;
+    
+    // Valor por defecto
+    //RCLCPP_INFO(this->get_logger(), "%f", closest_distance_to_skill);
+    //movement.vel.linear.x = 0.2;
+    
+
+    
+    // Reglas de movimiento referente a la distancia con las monedas
+
+    if (below == 1){
+        movement.vel.angular.z = 0.2;
+        RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba");
+    }else if(below == 0){
+        movement.vel.angular.z = -0.2;
+        RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo");
+    }
+
+    if(close_enough == 1){
+        movement.vel.angular.z = 0;
+        RCLCPP_INFO(this->get_logger(), "Suficientemente cercano");
+        movement.vel.linear.x = 0.5;
+        /*if(closest_distance_to_skill>2 && closest_distance_to_skill<3){
+            movement.vel.linear.x = 0.3;
+        }else if (closest_distance_to_skill>0.8){
+            movement.vel.linear.x = 0.2;
+        }else{
+            movement.vel.linear.x = 0.15;
+        }*/
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Close enough: %f", close_enough);
+    RCLCPP_INFO(this->get_logger(), "Below: %f", below);
+    RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
+
+
+    // Reglas de giro referente a los obstaculos
+    if (obstacle_front && obstacle_right) {
+        movement.vel.linear.x = 0.1;
+        movement.vel.angular.z = 0.4;
+        RCLCPP_INFO(this->get_logger(), "A la izquierda");
+    }
+    else if (obstacle_front && obstacle_left) {
+        movement.vel.linear.x = 0.1;
+        movement.vel.angular.z = -0.4;
+        RCLCPP_INFO(this->get_logger(), "A la derecha");
+    }
+    else if (obstacle_front) {
+        movement.vel.linear.x = 0;
+        movement.vel.angular.z = -0.4;
+        RCLCPP_INFO(this->get_logger(), "Atras");
+    }
+
+
+    
+
+    // Publicar
+    movement.code = code;
+    this->pub1_->publish(movement);
+
+}
+
+
+void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+{
+    //Reutilizacion de programa de procesamiento de laser de la navegacion reactiva
+
+    int array_size = msg->ranges.size();
+    //double angle_min = msg->angle_min; //= 
+    double angle_max = msg->angle_max; //= 
+    double angle_increment = msg->angle_increment;
+
+    int positions_to_look_sideways = (angle_max-M_PI/2)/angle_increment;
+    int left_laser = array_size - 1 - positions_to_look_sideways;
+    int right_laser = positions_to_look_sideways;
+    int front_laser = array_size/2;
+    int sweep = 0.4/angle_increment; //~=22 grados pasados a
+    //posiciones de array, ademas uso int para truncar el calculo
+
+    //Parametros para los bucles
+    double left_sweep_start = left_laser - sweep;
+    double left_sweep_end = left_laser + sweep;
+
+    double front_sweep_start = front_laser - sweep;
+    double front_sweep_end = front_laser + sweep;
+
+    double right_sweep_start = right_laser - sweep;
+    double right_sweep_end = right_laser + sweep;
+
+    //Flags para el programa de movimiento
+    bool obstacle_front = false;
+    bool obstacle_left = false;
+    bool obstacle_right = false;
+    double front_distance = msg->range_max;
+
+
+    //Aqui busco los obstaculos por la izquierda
+    for(int i = left_sweep_start; i < left_sweep_end; i++){
+        if(msg->ranges[i] < 1.5){
+            obstacle_left = true;
+            //RCLCPP_INFO(this->get_logger(), "IZQUIERDA");
+        }
+    }
+
+    //Aqui busco los obstaculos de delante
+    for(int j = front_sweep_start; j < front_sweep_end; j++){
+        if(msg->ranges[j] < 1){
+            obstacle_front = true;
+            if(front_distance > msg->ranges[j]){
+                front_distance = msg->ranges[j];
+            }
+        }
+    }
+
+    //Aqui busco los obstaculos de la derecha
+    for(int k = right_sweep_start; k < right_sweep_end; k++){
+        if(msg->ranges[k] < 1.5){
+            obstacle_right = true;
+            //RCLCPP_INFO(this->get_logger(), "DERECHA");
+        }
+    }
+
+    this->perform_movement(front_distance, obstacle_front, obstacle_left, obstacle_right);
+
+}
+
+
+
 
 

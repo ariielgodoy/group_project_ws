@@ -11,7 +11,7 @@ int main ( int argc, char * argv[] )
     
     auto node=std::make_shared<Warrior>();
 
-    rclcpp::Rate rate(1);
+    rclcpp::Rate rate(10);
 
     while(rclcpp::ok())
     {
