@@ -132,6 +132,8 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
         for (const auto &coins_pos : trajectory)
         {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", coins_pos[0], coins_pos[1]);  }
     }
+
+
     //RCL{CPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
     /*if (!skills_pos_array.empty())
     {
@@ -432,7 +434,7 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
         }
         else if (obstacle_front) {
             movement.vel.linear.x = 0;
-            movement.vel.angular.z = -0.4;
+            movement.vel.angular.z = 0.4;
             RCLCPP_INFO(this->get_logger(), "Atras");
         }
 
