@@ -19,21 +19,29 @@ public:
     ~Warrior();
 
     bool trajectory_calculated = false;
+    
     std::vector<std::vector<float>> trajectory;
-    // Función para procesar el sensor láser.
+    
     std::vector<std::vector<float>> trajectory_computation();
+    
+    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL);
+    
+    // Función para procesar el sensor láser.
     void process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg);
     
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);
 
-    void perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right);
-
     float previous_error = 0;
     float PID_for_aiming(float angle);
 
+    bool is_the_direction_blocked(sensor_msgs::msg::LaserScan::SharedPtr msg);
+
     //std::vector<float> euclidean_distance_and_angle_to_coins();
     std::vector<float> euclidean_distance_and_angle_to_coin();
+
+    
+
     
     //puedes añadir mas funciones si lo crees oportuno
 
