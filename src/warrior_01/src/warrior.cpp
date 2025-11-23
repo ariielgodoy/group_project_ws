@@ -74,7 +74,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
         
     // Se obtiene el valor de la batería de la clave "Battery_Level".
     battery = JsonSceneData["Battery_Level"].asFloat();
-
+    
     // Se obtiene la pose del robot a partir de la clave "Robot_Pose".
     pos_x = JsonSceneData["Robot_Pose"]["x"].asFloat();
     pos_y = JsonSceneData["Robot_Pose"]["y"].asFloat();
@@ -209,11 +209,34 @@ std::vector<std::vector<float>> Warrior::trajectory_computation()
 }
 
 
+float Warrior::PID_for_aiming(float angle){
+
+    float Kp = 2; //1.5 ha ido bien
+    float Kd = 0.1;
+    float DELTA_T = 0.1;
+
+    float angle_diff = (angle-gamma);
+    float current_error = atan2(sinf(angle_diff), cosf(angle_diff));
+
+
+    float P = Kp * current_error;
+
+    float derivative = (current_error - previous_error) / DELTA_T;
+    float D = Kd * derivative;
+
+    previous_error = current_error;
+
+    return P+D;
+}
+
+
+
 std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
     if(trajectory.empty()) return {};
 
     std::vector<float> datos;
+    float fixing_direction = 0;
     float close_enough;
     float below;
     float x_coin = trajectory[0][0];
@@ -227,39 +250,49 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
 
     float angle = angle_coins;
-    if(gamma < angle - 0.12){
+    
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+    ////// En vez de hacerlo con los if, lo he cambiado para calcularlo con atan2, que funciona mejor//
+    ////// Ya gira en la direccion mas corta para dirigirse a la moneda////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+    float angle_diff = angle - gamma;
+    float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
+
+    if(fabs(computing_real_angle_diff) < 0.14){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
+                                                //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
+                                                // para reajustar la direccion
+        close_enough = 1;
+    }else if(computing_real_angle_diff > 0){
         below = 1;
         close_enough = 0;
-    }else if (gamma > angle + 0.12){//0.09
+    }else{
         below = 0;
         close_enough = 0;
+    }
+
+    if(close_enough == 1){
+        fixing_direction = this->PID_for_aiming(angle);
     }else{
-        close_enough = 1;
+        previous_error = 0;
     }
 
-
-    if((gamma > M_PI/2 && angle < M_PI/2) or (angle > M_PI/2 && gamma < M_PI/2)){
-        if(gamma < angle - 0.12){
-            below = 0;
-            close_enough = 0;
-        }else if (gamma > angle + 0.12){//0.09
-            below = 1;
-            close_enough = 0;
-        }else{
-            close_enough = 1;
-        }
-    }
-
-
-    if(euclidean_distance_coins < 0.2){
+    if(euclidean_distance_coins < 0.5){
         trajectory.erase(trajectory.begin());
     }
     datos.push_back(euclidean_distance_coins);
     datos.push_back(below);
     datos.push_back(close_enough);
+    datos.push_back(fixing_direction);
     return datos;
 }
 
+
+////////////////////////////////////////////////////////////////////
+//ESTO DEJARLO POR SI SIRVE DE AYUDA EN UN FUTURO PARA LOS CALCULOS
+////////////////////////////////////////////////////////////////////
 
 /*std::vector<float> Warrior::euclidean_distance_and_angle_to_coins()
 {
@@ -375,8 +408,9 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
 
 
-
-
+/////////////////////////////////////////////////////////////////////////////
+//////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
 void Warrior::perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right)
 {
     std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(); //Para calcular la velocidad si esta cerca o lejos
@@ -384,13 +418,13 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
         float closest_distance_to_skill = datos[0];
         float below = datos[1];
         float close_enough = datos[2];
+        float fixing_direction = datos[3];
 
         rosgame_msgs::msg::RosgameTwist movement;
         
         // Valor por defecto
         //RCLCPP_INFO(this->get_logger(), "%f", closest_distance_to_skill);
         //movement.vel.linear.x = 0.2;
-        
 
         
         // Reglas de movimiento referente a la distancia con las monedas
@@ -407,6 +441,7 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
             movement.vel.angular.z = 0;
             RCLCPP_INFO(this->get_logger(), "Suficientemente cercano");
             movement.vel.linear.x = 0.5;
+            movement.vel.angular.z = fixing_direction;
             /*if(closest_distance_to_skill>2 && closest_distance_to_skill<3){
                 movement.vel.linear.x = 0.3;
             }else if (closest_distance_to_skill>0.8){
@@ -421,7 +456,7 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
         RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
 
 
-        // Reglas de giro referente a los obstaculos
+        /*// Reglas de giro referente a los obstaculos
         if (obstacle_front && obstacle_right) {
             movement.vel.linear.x = 0.1;
             movement.vel.angular.z = 0.4;
@@ -436,7 +471,7 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
             movement.vel.linear.x = 0;
             movement.vel.angular.z = 0.4;
             RCLCPP_INFO(this->get_logger(), "Atras");
-        }
+        }*/
 
 
         
@@ -448,7 +483,11 @@ void Warrior::perform_movement(float front_distance, bool obstacle_front, bool o
 
 }
 
-
+///////////////////////////////////////////////////////////////////////
+//ESTO SE TIENE QUE MEJORAR, ES UN POCO CHURRO COMO LO HICE LA VERDAD//
+/////////////////////////////////////////////////////////////////////////////////////
+//AHORA ESTA QUITADO PORQUE QUERIA PROBAR COMO TIRABA SOLO CON LA NAVEGACION GLOBAL//
+/////////////////////////////////////////////////////////////////////////////////////
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
     //Reutilizacion de programa de procesamiento de laser de la navegacion reactiva
@@ -482,9 +521,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     double front_distance = msg->range_max;
 
 
-    //Aqui busco los obstaculos por la izquierda
+    /*//Aqui busco los obstaculos por la izquierda
     for(int i = left_sweep_start; i < left_sweep_end; i++){
-        if(msg->ranges[i] < 1.5){
+        if(msg->ranges[i] < 0.75){
             obstacle_left = true;
             //RCLCPP_INFO(this->get_logger(), "IZQUIERDA");
         }
@@ -492,7 +531,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Aqui busco los obstaculos de delante
     for(int j = front_sweep_start; j < front_sweep_end; j++){
-        if(msg->ranges[j] < 1){
+        if(msg->ranges[j] < 0.5){
             obstacle_front = true;
             if(front_distance > msg->ranges[j]){
                 front_distance = msg->ranges[j];
@@ -502,11 +541,11 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Aqui busco los obstaculos de la derecha
     for(int k = right_sweep_start; k < right_sweep_end; k++){
-        if(msg->ranges[k] < 1.5){
+        if(msg->ranges[k] < 0.75){
             obstacle_right = true;
             //RCLCPP_INFO(this->get_logger(), "DERECHA");
         }
-    }
+    }*/
 
     this->perform_movement(front_distance, obstacle_front, obstacle_left, obstacle_right);
     

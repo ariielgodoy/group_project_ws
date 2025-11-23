@@ -29,7 +29,8 @@ public:
 
     void perform_movement(float front_distance, bool obstacle_front, bool obstacle_left, bool obstacle_right);
 
-    
+    float previous_error = 0;
+    float PID_for_aiming(float angle);
 
     //std::vector<float> euclidean_distance_and_angle_to_coins();
     std::vector<float> euclidean_distance_and_angle_to_coin();
