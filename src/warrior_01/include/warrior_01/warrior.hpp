@@ -24,8 +24,13 @@ public:
     
     std::vector<std::vector<float>> trajectory_computation();
     
-    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL);
-    
+    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL, bool close_enough_avoiding, bool below_avoiding, float fixing_direction_avoiding, float front_distance);
+
+
+    int encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index);
+
+    bool MOVE_TO_GOAL = true;
+    bool OBSTACLE_FOUND = false;
     // Función para procesar el sensor láser.
     void process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg);
     

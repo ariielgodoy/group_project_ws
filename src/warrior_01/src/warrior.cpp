@@ -295,7 +295,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 /////////////////////////////////////////////////////////////////////////////
 //////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Warrior::perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL)
+void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, bool close_enough_avoiding, bool below_avoiding, float fixing_direction_avoiding, float front_distance)
 {
     std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(); //Para calcular la velocidad si esta cerca o lejos
     if (!datos.empty()){
@@ -306,9 +306,13 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL)
 
         rosgame_msgs::msg::RosgameTwist movement;
 
-        
+        /////////////////////////////////////////////////////////////////////////////
+        ///Se repite el patron de movimiento, por lo que hace falta un subprograma///
+        /////////////////////////////////////////////////////////////////////////////
+
         // Reglas de movimiento referente a la distancia con las monedas
         if(MOVE_TO_GOAL){
+            RCLCPP_INFO(this->get_logger(),"Goin' for the Gs homie");
             if (below == 1){
                 movement.vel.angular.z = 0.2;
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba");
@@ -318,7 +322,6 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL)
             }
 
             if(close_enough == 1){
-                movement.vel.angular.z = 0;
                 RCLCPP_INFO(this->get_logger(), "Suficientemente cercano");
                 movement.vel.linear.x = 0.5;
                 movement.vel.angular.z = fixing_direction;
@@ -328,8 +331,32 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL)
             RCLCPP_INFO(this->get_logger(), "Below: %f", below);
             RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
         }
-        else if(FOLLOW_WALL){
+        else if(OBSTACLE_FOUND){
             RCLCPP_INFO(this->get_logger(), "Should be avoiding");
+            if (below_avoiding == 1){
+                movement.vel.linear.x = 0.05;
+                movement.vel.angular.z = 0.2;
+                if(front_distance < 0.8){
+                    movement.vel.linear.x = -0.05;
+                    movement.vel.angular.z = 0.2;
+                }
+                RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba nigga");
+            }else if(below_avoiding == 0){
+                movement.vel.linear.x = 0.05;
+                movement.vel.angular.z = -0.2;
+                if(front_distance < 0.8){
+                    movement.vel.linear.x = -0.05;
+                    movement.vel.angular.z = -0.2;
+                }
+                RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo nigga");
+            }
+
+            if(close_enough_avoiding == 1){
+                RCLCPP_INFO(this->get_logger(), "Suficientemente cercano nigga");
+                movement.vel.linear.x = 0.2;
+                movement.vel.angular.z = fixing_direction_avoiding;//fixing_direction_avoiding;
+            }
+
         }
 
 
@@ -338,6 +365,31 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL)
         this->pub1_->publish(movement);
     }
 
+}
+
+
+
+int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index){
+    std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
+
+    int delta = 1;
+    while (true) {
+        // Opción 1: Hacia arriba
+        int numUp = search_index + delta;
+        // El método .find() en std::unordered_set devuelve .end() si no encuentra el elemento.
+        if (obstacleSet.find(numUp) == obstacleSet.end()) {
+            return numUp;
+        }
+
+        // Opción 2: Hacia abajo
+        int numDown = search_index - delta;
+        
+        if (numDown >= 0 && obstacleSet.find(numDown) == obstacleSet.end()) {
+            return numDown;
+        }
+
+        delta++;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -351,6 +403,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     int array_size = msg->ranges.size();
     //double angle_min = msg->angle_min; //= 
     double angle_max = msg->angle_max; //= 
+    double angle_min = msg->angle_min;
     double angle_increment = msg->angle_increment;
 
     /*int positions_to_look_sideways = (angle_max-M_PI/2)/angle_increment;
@@ -372,11 +425,17 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     //Flags para el programa de movimiento
     
-    bool MOVE_TO_GOAL = true;
-    bool FOLLOW_WALL = false;
     double front_distance = msg->range_max;
     int start_sweep;
     int end_sweep;
+    std::vector<int> obstacles;
+    int indice_libre;
+    float angle_to_move;
+
+    bool close_enough;
+    bool below;
+    bool fixing_direction;
+
 
 
     //Aqui busco el angulo de la moneda con respecto al robot para saber si esa parte esta ocupada
@@ -388,34 +447,95 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         float angle_diff = angle_to_objective - gamma;
         float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
 
-        if(fabs(computing_real_angle_diff) > angle_max){
-            MOVE_TO_GOAL = true;
-            FOLLOW_WALL = false;
-        }
+        float euclidean_distance_coin = sqrt((desired_x-pos_x)*(desired_x-pos_x) + (desired_y-pos_y)*(desired_y-pos_y));
 
         int search_index = array_size/2 + computing_real_angle_diff/angle_increment;
-        if(search_index-5 < 0){
+        if(search_index-12 < 0){
             start_sweep = 0;
         }else{
-            start_sweep = search_index-5;
+            start_sweep = search_index-12;
         }
 
-        if(search_index + 5 > array_size){
+        if(search_index + 12 > array_size){
             end_sweep = array_size;
         }else{
-            end_sweep = search_index + 5;
+            end_sweep = search_index + 12;
         }
 
-
+        if(msg->ranges[search_index] > msg->range_max){
+            MOVE_TO_GOAL = true;
+            OBSTACLE_FOUND = false;
+        }
         for(int i = start_sweep; i < end_sweep; i++){ //Deberia hacer un subprograma para calcular los calculos intermedios
-            if(msg->ranges[i] < 1){
+            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < msg->range_max){
                 MOVE_TO_GOAL = false;
-                FOLLOW_WALL = true;
+                OBSTACLE_FOUND = true;
             }
         }
+
+        if(OBSTACLE_FOUND){
+            for(int j = 0; j < array_size; j++){
+                if(msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < msg->range_max){
+                    obstacles.push_back(j);
+                }
+
+                if(j > array_size/2-10 && j < array_size/2 + 10){
+                    if(front_distance > msg->ranges[j]){
+                        front_distance = msg->ranges[j];
+                    }
+                }
+            }
+            
+            indice_libre = encontrarCercanoNoObstaculo(obstacles, search_index);
+
+
+            ///////////////////////////////////////////////////////////////////////////////////////////////////////
+            //Esta parte puede que ayude en el subprograma cuando solo haya una pared, pero ahora buscar el centro
+            /*if(msg->ranges[indice_libre - 1]>msg->ranges[indice_libre + 1]){
+                float y = -16*msg->ranges[indice_libre + 1] + 100;
+                indice_libre = indice_libre + y;
+            }else{
+                float y = -16*msg->ranges[indice_libre - 1] + 100;
+                indice_libre = indice_libre - y;
+            }*/
+
+            angle_to_move = indice_libre * angle_increment - angle_min;
+
+
+            /////////////////////////////////////////////////////////////////////////////////////////
+            ////Codigo repetido, cambiar por subprograma/////////////////////////////////////////////
+            /////////////////////////////////////////////////////////////////////////////////////////
+
+
+            float angle_difference = angle_to_move - gamma;
+            float computing_real_angle_difference = atan2(sin(angle_difference), cos(angle_difference));
+
+            if(fabs(computing_real_angle_difference) < 0.4){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
+                                                        //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
+                                                        // para reajustar la direccion
+                close_enough = 1;
+                below = 2;
+            }else if(computing_real_angle_difference > 0){
+                below = 1;
+                close_enough = 0;
+            }else{
+                below = 0;
+                close_enough = 0;
+            }
+
+            if(close_enough == 1){
+                fixing_direction = this->PID_for_aiming(angle_difference);
+            }else{
+                previous_error = 0;
+            }
+
+        }
+
+
+
     }
     
-    this->perform_movement(MOVE_TO_GOAL, FOLLOW_WALL);
+    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, front_distance);
 }
 
 
