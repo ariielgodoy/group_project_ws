@@ -372,6 +372,7 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
 
 int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg){
 
+    double angle_min = msg->angle_min;
     std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
     double angle_increment = msg->angle_increment;
     search_index = 684/2;
@@ -429,8 +430,8 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
     int angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
 
     float angle_to_follow;
-    int index_to_follow = centro_del_hueco;
-    if(limite_izquierdo == msg->ranges.size()-1 or limite_derecho == 0 or limite_izquierdo-limite_derecho < 90){
+
+    /*if(limite_izquierdo == msg->ranges.size()-1 or limite_derecho == 0 or limite_izquierdo-limite_derecho < 90){
         //////////////////////////////////////////////////////////////
         //AQUI SE PODRIA PONER UNA FUNCION PARA NO REPETIR EL CODIGO//
         //////////////////////////////////////////////////////////////
@@ -496,7 +497,7 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
             angle_to_follow += 2 * M_PI;
         }
         angulo_a_seguir = angle_to_follow;
-    }
+    }*/
     return angulo_a_seguir;
 }
 
@@ -521,7 +522,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     int start_sweep;
     int end_sweep;
     std::vector<int> obstacles;
-    int indice_libre;
+    float angulo_libre;
     float angle_to_move;
 
     float close_enough = 0;
@@ -644,11 +645,11 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 }
             }
            
-            indice_libre = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
+            angulo_libre = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
 
 
 
-            angle_to_move = indice_libre * angle_increment + angle_min;
+            angle_to_move = angulo_libre;
             RCLCPP_INFO(this->get_logger(), "Angulo_elegido: %f", angle_to_move*360/(2*M_PI));
 
 

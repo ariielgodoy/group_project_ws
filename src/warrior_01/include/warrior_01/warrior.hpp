@@ -29,7 +29,7 @@ public:
 
     int encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
-    float compute_euclidean_distance(float x1, float y2, float x2, float y2);
+    float compute_euclidean_distance(float x1, float x2, float y1, float y2);
 
 
     bool MOVE_TO_GOAL = true;
