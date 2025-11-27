@@ -162,7 +162,12 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     */
 }
 
+float Warrior::compute_euclidean_distance(float x1, float x2, float y1, float y2){
+    
+    float distance = sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
 
+    return distance;
+}
 
 std::vector<std::vector<float>> Warrior::trajectory_computation()
 {
@@ -185,8 +190,7 @@ std::vector<std::vector<float>> Warrior::trajectory_computation()
             {
                 float x = skill_pos[0];
                 float y = skill_pos[1];
-
-                float euclidean_distance_coins = sqrt((x-simulated_x_position)*(x-simulated_x_position) + (y-simulated_y_position)*(y-simulated_y_position));
+                float euclidean_distance_coins = compute_euclidean_distance(simulated_x_position, x, simulated_y_position, y);
                 distances_coins.push_back(euclidean_distance_coins); //No hace falta usar el contador para acceder a las posiciones
                 //Y no va a haber el problema del overflow que habia antes
             }
@@ -241,7 +245,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
     float x_coin = trajectory[0][0];
     float y_coin = trajectory[0][1];
 
-    float euclidean_distance_coins = sqrt((x_coin-pos_x)*(x_coin-pos_x) + (y_coin-pos_y)*(y_coin-pos_y));
+    float euclidean_distance_coins = compute_euclidean_distance(x_coin, pos_x, y_coin, pos_y);
     float x_for_the_angle_coins = x_coin - pos_x;
     float y_for_the_angle_coins = y_coin - pos_y;
 
@@ -311,13 +315,18 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
 
         // Reglas de movimiento referente a la distancia con las monedas
         if(MOVE_TO_GOAL){
-            movement.vel.linear.x = 0.2;
+            movement.vel.linear.x = 0.1;
             RCLCPP_INFO(this->get_logger(),"Goin' for the Gs homie");
             if (below == 1){
-
+                if(closest_distance_to_skill < 2){
+                    movement.vel.linear.x = 0;
+                }
                 movement.vel.angular.z = 0.2;
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba");
             }else if(below == 0){
+                if(closest_distance_to_skill < 2){
+                    movement.vel.linear.x = 0;
+                }
                 movement.vel.angular.z = -0.2;
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo");
             }
@@ -416,9 +425,9 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
     }
 
     // 4. Calcular el Centro del Hueco y devolverlo
-    
-    // El centro es la media aritmética de los dos límites.
     int centro_del_hueco = (limite_izquierdo + limite_derecho) / 2;
+    int angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
+
     float angle_to_follow;
     int index_to_follow = centro_del_hueco;
     if(limite_izquierdo == msg->ranges.size()-1 or limite_derecho == 0 or limite_izquierdo-limite_derecho < 90){
@@ -430,8 +439,8 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
         if(limite_izquierdo == msg->ranges.size()-1){
             float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-2];
             float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-30];
-            float ultimo_punto_ocupado_angulo = (punto_libre_cercano-2)*angle_increment + msg->angle_min;
-            float penultimo_punto_ocupado_angulo = (punto_libre_cercano-30)*angle_increment + msg->angle_min;
+            float ultimo_punto_ocupado_angulo = -(punto_libre_cercano-2)*angle_increment + M_PI/2;
+            float penultimo_punto_ocupado_angulo = -(punto_libre_cercano-30)*angle_increment + M_PI/2;
 
             //lo convierto a coordenadas locales del robot
             float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
@@ -440,19 +449,26 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
             float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
 
             
-            float m_num = (y_ultimo-y_penultimo);
-            float m_den = (x_ultimo-x_penultimo);
-            angle_wall = atan2(m_num, m_den);
+            float m_num = (x_ultimo-x_penultimo);
+            float m_den = (y_ultimo-y_penultimo);
+            if(m_num < 0){
+                angle_wall = -angle_wall;
+            }
+            else if(m_den< 0){
+                m_den = -m_den;
+            }
+            angle_wall = atan(m_num/m_den);
 
-            angle_to_follow = angle_wall - M_PI/2;
+
+            angle_to_follow = angle_wall;
 
             
 
         }else if(limite_derecho == 0){
             float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+2];
             float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+30];
-            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment + msg->angle_min;
-            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+30)*angle_increment + msg->angle_min;
+            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment - M_PI/2;
+            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+30)*angle_increment - M_PI/2;
 
             float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
             float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
@@ -460,11 +476,18 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
             float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
 
             //lo convierto a coordenadas locales del robot
-            float m_num = (y_ultimo-y_penultimo);
-            float m_den = (x_ultimo-x_penultimo);
-            angle_wall = atan2(m_num, m_den);
+            float m_den = (y_ultimo-y_penultimo);
+            float m_num = (x_ultimo-x_penultimo);
 
-            angle_to_follow = angle_wall + M_PI/2;
+            if(m_num < 0){
+                angle_wall = -angle_wall;
+            }
+            else if(m_den > 0){
+                m_den = -m_den;
+            }
+            angle_wall = atan(m_num/m_den);
+
+            angle_to_follow = angle_wall;
         }
         
         if (angle_to_follow > M_PI) {
@@ -472,9 +495,9 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
         } else if (angle_to_follow <= -M_PI) {
             angle_to_follow += 2 * M_PI;
         }
-        index_to_follow = (angle_to_follow - msg->angle_min)/angle_increment;
+        angulo_a_seguir = angle_to_follow;
     }
-    return index_to_follow;
+    return angulo_a_seguir;
 }
 
 ///////////////////////////////////////////////////////////////////////
