@@ -222,11 +222,11 @@ float Warrior::PID_for_aiming(float angle){
     float P = Kp * current_error;
 
     float derivative = (current_error - previous_error) / DELTA_T;
-    float D = Kd * derivative;
+    //float D = Kd * derivative;
 
-    previous_error = current_error;
+    //previous_error = current_error;
 
-    return P+D;
+    return P;//+D;
 }
 
 
@@ -311,7 +311,7 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
 
         // Reglas de movimiento referente a la distancia con las monedas
         if(MOVE_TO_GOAL){
-            movement.vel.linear.x = 0.05;
+            movement.vel.linear.x = 0.2;
             RCLCPP_INFO(this->get_logger(),"Goin' for the Gs homie");
             if (below == 1){
 
@@ -333,7 +333,7 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
             RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
         }
         else if(OBSTACLE_FOUND){
-            movement.vel.linear.x = 0;
+            movement.vel.linear.x = 0.1;
             RCLCPP_INFO(this->get_logger(), "Should be avoiding");
             if (below_avoiding == 1){
                 movement.vel.angular.z = 0.2;
@@ -428,10 +428,10 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
         float angle_wall;
         RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
         if(limite_izquierdo == msg->ranges.size()-1){
-            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-1];
-            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-2];
-            float ultimo_punto_ocupado_angulo = (punto_libre_cercano-1)*angle_increment + msg->angle_min;
-            float penultimo_punto_ocupado_angulo = (punto_libre_cercano-2)*angle_increment + msg->angle_min;
+            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-2];
+            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-30];
+            float ultimo_punto_ocupado_angulo = (punto_libre_cercano-2)*angle_increment + msg->angle_min;
+            float penultimo_punto_ocupado_angulo = (punto_libre_cercano-30)*angle_increment + msg->angle_min;
 
             //lo convierto a coordenadas locales del robot
             float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
@@ -519,22 +519,48 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         float euclidean_distance_coin = sqrt((desired_x-pos_x)*(desired_x-pos_x) + (desired_y-pos_y)*(desired_y-pos_y));
         bool obstacle_detected_in_path = false;
         int search_index = array_size/2 + computing_real_angle_diff/angle_increment;
-        if(search_index-50 < 0){
+        if(search_index-20 < 0){
             start_sweep = 0;
             RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
             obstacle_detected_in_path = true;
         }else{
-            start_sweep = search_index-50;
+            start_sweep = search_index-20;
         }
 
-        if(search_index + 50 > array_size){
+        if(search_index + 20 > array_size){
             end_sweep = array_size - 1;
             RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
             obstacle_detected_in_path = true;
         }else{
-            end_sweep = search_index + 50;
+            end_sweep = search_index + 20;
         }
+        int izquierda = 0;
+        int centro = 0;
+        int derecha = 0;
+        for(int k = 86; k <171; k++){
+            if(msg->ranges[k]<0.7){
+                derecha++;
+                if(derecha>10){
+                    obstacle_detected_in_path = true;
+                }
+                
+            }
 
+
+            if(msg->ranges[k+214] < 0.7){
+                centro++;
+                if(centro>10){
+                    obstacle_detected_in_path = true;
+                }
+            }
+
+            if(msg->ranges[k+427]<0.7){
+                izquierda++;
+                if(izquierda>10){
+                    obstacle_detected_in_path = true;
+                }
+            }
+        }
         ////////////////////////////////////////////////////////////////////////////
         
         
@@ -625,7 +651,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
 
             if(close_enough == 1){
-                fixing_direction = 0;//this->PID_for_aiming_obstacle(angle_difference);
+                fixing_direction = this->PID_for_aiming(angle_difference);
             }
 
         }
