@@ -24,10 +24,10 @@ public:
     
     std::vector<std::vector<float>> trajectory_computation();
     
-    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL, bool close_enough_avoiding, bool below_avoiding, float fixing_direction_avoiding, float front_distance);
+    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, float front_distance);
 
 
-    int encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index);
+    int encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
     bool MOVE_TO_GOAL = true;
     bool OBSTACLE_FOUND = false;
@@ -40,7 +40,6 @@ public:
     float previous_error = 0;
     float PID_for_aiming(float angle);
 
-    bool is_the_direction_blocked(sensor_msgs::msg::LaserScan::SharedPtr msg);
 
     //std::vector<float> euclidean_distance_and_angle_to_coins();
     std::vector<float> euclidean_distance_and_angle_to_coin();

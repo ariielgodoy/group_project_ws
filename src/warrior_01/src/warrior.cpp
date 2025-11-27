@@ -230,7 +230,6 @@ float Warrior::PID_for_aiming(float angle){
 }
 
 
-
 std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
     if(trajectory.empty()) return {};
@@ -295,7 +294,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 /////////////////////////////////////////////////////////////////////////////
 //////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, bool close_enough_avoiding, bool below_avoiding, float fixing_direction_avoiding, float front_distance)
+void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, float front_distance)
 {
     std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(); //Para calcular la velocidad si esta cerca o lejos
     if (!datos.empty()){
@@ -312,8 +311,10 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, bool clos
 
         // Reglas de movimiento referente a la distancia con las monedas
         if(MOVE_TO_GOAL){
+            movement.vel.linear.x = 0.05;
             RCLCPP_INFO(this->get_logger(),"Goin' for the Gs homie");
             if (below == 1){
+
                 movement.vel.angular.z = 0.2;
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba");
             }else if(below == 0){
@@ -332,29 +333,20 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, bool clos
             RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
         }
         else if(OBSTACLE_FOUND){
+            movement.vel.linear.x = 0;
             RCLCPP_INFO(this->get_logger(), "Should be avoiding");
             if (below_avoiding == 1){
-                movement.vel.linear.x = 0.05;
                 movement.vel.angular.z = 0.2;
-                if(front_distance < 0.8){
-                    movement.vel.linear.x = -0.05;
-                    movement.vel.angular.z = 0.2;
-                }
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba nigga");
             }else if(below_avoiding == 0){
-                movement.vel.linear.x = 0.05;
                 movement.vel.angular.z = -0.2;
-                if(front_distance < 0.8){
-                    movement.vel.linear.x = -0.05;
-                    movement.vel.angular.z = -0.2;
-                }
                 RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo nigga");
             }
 
             if(close_enough_avoiding == 1){
                 RCLCPP_INFO(this->get_logger(), "Suficientemente cercano nigga");
                 movement.vel.linear.x = 0.2;
-                movement.vel.angular.z = fixing_direction_avoiding;//fixing_direction_avoiding;
+                movement.vel.angular.z = fixing_direction_avoiding;
             }
 
         }
@@ -369,27 +361,120 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, bool clos
 
 
 
-int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index){
-    std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
+int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg){
 
+    std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
+    double angle_increment = msg->angle_increment;
+    search_index = 684/2;
+    // 1. Verificar si el propio search_index está libre (máxima atracción)
+    //if (obstacleSet.find(search_index) == obstacleSet.end()) {
+    //    return search_index;
+    //}
+
+    // 2. Buscar el Primer Punto Libre (PuntoInicialLibre)
+    int punto_libre_cercano = -1;
     int delta = 1;
-    while (true) {
-        // Opción 1: Hacia arriba
+    int array_size = msg->ranges.size();
+
+    while (delta < array_size) { // Límite de seguridad
         int numUp = search_index + delta;
-        // El método .find() en std::unordered_set devuelve .end() si no encuentra el elemento.
-        if (obstacleSet.find(numUp) == obstacleSet.end()) {
-            return numUp;
+        int numDown = search_index - delta;
+
+        // Opción 1: Hacia arriba
+        if (numUp < array_size && obstacleSet.find(numUp) == obstacleSet.end()) {
+            punto_libre_cercano = numUp;
+            break;
         }
 
         // Opción 2: Hacia abajo
-        int numDown = search_index - delta;
-        
         if (numDown >= 0 && obstacleSet.find(numDown) == obstacleSet.end()) {
-            return numDown;
+            punto_libre_cercano = numDown;
+            break;
         }
 
         delta++;
     }
+
+    if (punto_libre_cercano == -1) {
+        return search_index; // No se encontró camino libre (todo bloqueado)
+    }
+
+    // 3. Encontrar los Límites del Hueco que contiene a PuntoInicialLibre
+
+    // Límite derecho (Buscando el obstáculo y el borde del sensor hacia abajo)
+    int limite_derecho = punto_libre_cercano;
+    // Mientras no sea el índice 0 Y el índice anterior esté libre
+    while (limite_derecho > 0 && obstacleSet.find(limite_derecho - 1) == obstacleSet.end()) {
+        limite_derecho--;
+    }
+    
+    // Límite izquierdo (Buscando el obstáculo y el borde del sensor hacia arriba)
+    int limite_izquierdo = punto_libre_cercano;
+    // Mientras no sea el último índice Y el índice siguiente esté libre
+    while (limite_izquierdo < array_size - 1 && obstacleSet.find(limite_izquierdo + 1) == obstacleSet.end()) {
+        limite_izquierdo++;
+    }
+
+    // 4. Calcular el Centro del Hueco y devolverlo
+    
+    // El centro es la media aritmética de los dos límites.
+    int centro_del_hueco = (limite_izquierdo + limite_derecho) / 2;
+    float angle_to_follow;
+    int index_to_follow = centro_del_hueco;
+    if(limite_izquierdo == msg->ranges.size()-1 or limite_derecho == 0 or limite_izquierdo-limite_derecho < 90){
+        //////////////////////////////////////////////////////////////
+        //AQUI SE PODRIA PONER UNA FUNCION PARA NO REPETIR EL CODIGO//
+        //////////////////////////////////////////////////////////////
+        float angle_wall;
+        RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
+        if(limite_izquierdo == msg->ranges.size()-1){
+            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-1];
+            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-2];
+            float ultimo_punto_ocupado_angulo = (punto_libre_cercano-1)*angle_increment + msg->angle_min;
+            float penultimo_punto_ocupado_angulo = (punto_libre_cercano-2)*angle_increment + msg->angle_min;
+
+            //lo convierto a coordenadas locales del robot
+            float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
+            float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
+            float x_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
+            float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
+
+            
+            float m_num = (y_ultimo-y_penultimo);
+            float m_den = (x_ultimo-x_penultimo);
+            angle_wall = atan2(m_num, m_den);
+
+            angle_to_follow = angle_wall - M_PI/2;
+
+            
+
+        }else if(limite_derecho == 0){
+            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+1];
+            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+2];
+            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+1)*angle_increment + msg->angle_min;
+            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment + msg->angle_min;
+
+            float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
+            float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
+            float x_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
+            float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
+
+            //lo convierto a coordenadas locales del robot
+            float m_num = (y_ultimo-y_penultimo);
+            float m_den = (x_ultimo-x_penultimo);
+            angle_wall = atan2(m_num, m_den);
+
+            angle_to_follow = angle_wall + M_PI/2;
+        }
+        
+        if (angle_to_follow > M_PI) {
+            angle_to_follow -= 2 * M_PI;
+        } else if (angle_to_follow <= -M_PI) {
+            angle_to_follow += 2 * M_PI;
+        }
+        index_to_follow = (angle_to_follow - msg->angle_min)/angle_increment;
+    }
+    return index_to_follow;
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -406,22 +491,6 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     double angle_min = msg->angle_min;
     double angle_increment = msg->angle_increment;
 
-    /*int positions_to_look_sideways = (angle_max-M_PI/2)/angle_increment;
-    int left_laser = array_size - 1 - positions_to_look_sideways;
-    int right_laser = positions_to_look_sideways;
-    int front_laser = array_size/2;
-    int sweep = 228;//0.4/angle_increment; //~=22 grados pasados a
-    //posiciones de array, ademas uso int para truncar el calculo
-
-    //Parametros para los bucles
-    double left_sweep_start = left_laser - sweep;
-    double left_sweep_end = left_laser + sweep;
-
-    double front_sweep_start = front_laser - sweep;
-    double front_sweep_end = front_laser + sweep;
-
-    double right_sweep_start = right_laser - sweep;
-    double right_sweep_end = right_laser + sweep;*/
 
     //Flags para el programa de movimiento
     
@@ -432,9 +501,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     int indice_libre;
     float angle_to_move;
 
-    bool close_enough;
-    bool below;
-    bool fixing_direction;
+    float close_enough = 0;
+    float below = 0;
+    float fixing_direction = 0;
 
 
 
@@ -448,58 +517,90 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
 
         float euclidean_distance_coin = sqrt((desired_x-pos_x)*(desired_x-pos_x) + (desired_y-pos_y)*(desired_y-pos_y));
-
+        bool obstacle_detected_in_path = false;
         int search_index = array_size/2 + computing_real_angle_diff/angle_increment;
-        if(search_index-12 < 0){
+        if(search_index-50 < 0){
             start_sweep = 0;
+            RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
+            obstacle_detected_in_path = true;
         }else{
-            start_sweep = search_index-12;
+            start_sweep = search_index-50;
         }
 
-        if(search_index + 12 > array_size){
-            end_sweep = array_size;
+        if(search_index + 50 > array_size){
+            end_sweep = array_size - 1;
+            RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
+            obstacle_detected_in_path = true;
         }else{
-            end_sweep = search_index + 12;
+            end_sweep = search_index + 50;
         }
 
-        if(msg->ranges[search_index] > msg->range_max){
-            MOVE_TO_GOAL = true;
-            OBSTACLE_FOUND = false;
-        }
-        for(int i = start_sweep; i < end_sweep; i++){ //Deberia hacer un subprograma para calcular los calculos intermedios
-            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < msg->range_max){
-                MOVE_TO_GOAL = false;
-                OBSTACLE_FOUND = true;
+        ////////////////////////////////////////////////////////////////////////////
+        
+        
+        // 2. Buscar obstáculos en el barrido central
+        for(int i = start_sweep; i < end_sweep; i++){ 
+            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < 2){
+                obstacle_detected_in_path = true;
+                break; // Detener en cuanto se encuentra el primero
             }
         }
+        /////////////////////////////////////////////////////////////////
+        OBSTACLE_FOUND = obstacle_detected_in_path;
+        MOVE_TO_GOAL = !obstacle_detected_in_path;
+        
 
         if(OBSTACLE_FOUND){
-            for(int j = 0; j < array_size; j++){
-                if(msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < msg->range_max){
-                    obstacles.push_back(j);
-                }
+            // Añade esta constante al inicio de process_laser_info o como una constante de clase
+            const int MIN_OBSTACLE_POINTS = 10; 
 
-                if(j > array_size/2-10 && j < array_size/2 + 10){
-                    if(front_distance > msg->ranges[j]){
-                        front_distance = msg->ranges[j];
+            // --- Bloque de Relleno de Obstáculos Modificado ---
+
+            // Paso 1: Identificar y agrupar obstáculos potenciales
+            std::vector<int> current_cluster;
+            //int array_size = msg->ranges.size(); // Asegúrate de usar el array_size correcto
+
+            for(int j = 0; j < array_size; j++){
+                
+                // Condición: ¿Es un punto de obstáculo potencial?
+                bool is_obstacle_point = (msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < msg->range_max);
+
+                if(is_obstacle_point){
+                    // Si es un obstáculo potencial, añadirlo al clúster actual
+                    current_cluster.push_back(j);
+                } else {
+                    // Si no es un obstáculo (fin del clúster o ruido):
+                    
+                    // Paso 2: Verificar el tamaño del clúster anterior
+                    if(current_cluster.size() >= MIN_OBSTACLE_POINTS){
+                        // Si es suficientemente grande (ej. >= 10), es un obstáculo real.
+                        // Añadir todos los índices del clúster a la lista final de obstáculos.
+                        obstacles.insert(obstacles.end(), current_cluster.begin(), current_cluster.end());
                     }
+                    
+                    // Paso 3: Reiniciar el clúster para la próxima búsqueda
+                    current_cluster.clear();
                 }
             }
-            
-            indice_libre = encontrarCercanoNoObstaculo(obstacles, search_index);
+
+            // Paso 4: Manejar el último clúster (si el obstáculo llega al final del array)
+            if(current_cluster.size() >= MIN_OBSTACLE_POINTS){
+                obstacles.insert(obstacles.end(), current_cluster.begin(), current_cluster.end());
+            }
+
+            // --- Resto de process_laser_info continúa... ---
+            if(!obstacles.empty()){
+                for(int h = 0; h < obstacles.size(); h++){
+                    RCLCPP_INFO(this->get_logger(), "%d", obstacles[h]);
+                }
+            }
+           
+            indice_libre = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
 
 
-            ///////////////////////////////////////////////////////////////////////////////////////////////////////
-            //Esta parte puede que ayude en el subprograma cuando solo haya una pared, pero ahora buscar el centro
-            /*if(msg->ranges[indice_libre - 1]>msg->ranges[indice_libre + 1]){
-                float y = -16*msg->ranges[indice_libre + 1] + 100;
-                indice_libre = indice_libre + y;
-            }else{
-                float y = -16*msg->ranges[indice_libre - 1] + 100;
-                indice_libre = indice_libre - y;
-            }*/
 
-            angle_to_move = indice_libre * angle_increment - angle_min;
+            angle_to_move = indice_libre * angle_increment + angle_min;
+            RCLCPP_INFO(this->get_logger(), "Angulo_elegido: %f", angle_to_move*360/(2*M_PI));
 
 
             /////////////////////////////////////////////////////////////////////////////////////////
@@ -507,10 +608,10 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             /////////////////////////////////////////////////////////////////////////////////////////
 
 
-            float angle_difference = angle_to_move - gamma;
+            float angle_difference = angle_to_move;
             float computing_real_angle_difference = atan2(sin(angle_difference), cos(angle_difference));
 
-            if(fabs(computing_real_angle_difference) < 0.4){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
+            if(fabs(computing_real_angle_difference) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
                                                         //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
                                                         // para reajustar la direccion
                 close_enough = 1;
@@ -524,9 +625,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
 
             if(close_enough == 1){
-                fixing_direction = this->PID_for_aiming(angle_difference);
-            }else{
-                previous_error = 0;
+                fixing_direction = 0;//this->PID_for_aiming_obstacle(angle_difference);
             }
 
         }
@@ -534,7 +633,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
 
     }
-    
+    RCLCPP_INFO(this->get_logger(), "close_enough: %f, below: %f", close_enough, below);
     this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, front_distance);
 }
 
