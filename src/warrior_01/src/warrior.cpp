@@ -449,10 +449,10 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
             
 
         }else if(limite_derecho == 0){
-            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+1];
-            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+2];
-            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+1)*angle_increment + msg->angle_min;
-            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment + msg->angle_min;
+            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+2];
+            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+30];
+            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment + msg->angle_min;
+            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+30)*angle_increment + msg->angle_min;
 
             float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
             float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
