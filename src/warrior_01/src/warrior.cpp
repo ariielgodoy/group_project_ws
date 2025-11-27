@@ -283,7 +283,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
         previous_error = 0;
     }
 
-    if(euclidean_distance_coins < 0.5){
+    if(euclidean_distance_coins < 0.3){
         trajectory.erase(trajectory.begin());
     }
 
@@ -370,7 +370,7 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
 
 
 
-int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg){
+float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg){
 
     double angle_min = msg->angle_min;
     std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
@@ -381,7 +381,6 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
     //    return search_index;
     //}
 
-    // 2. Buscar el Primer Punto Libre (PuntoInicialLibre)
     int punto_libre_cercano = -1;
     int delta = 1;
     int array_size = msg->ranges.size();
@@ -390,13 +389,11 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
         int numUp = search_index + delta;
         int numDown = search_index - delta;
 
-        // Opción 1: Hacia arriba
         if (numUp < array_size && obstacleSet.find(numUp) == obstacleSet.end()) {
             punto_libre_cercano = numUp;
             break;
         }
 
-        // Opción 2: Hacia abajo
         if (numDown >= 0 && obstacleSet.find(numDown) == obstacleSet.end()) {
             punto_libre_cercano = numDown;
             break;
@@ -406,14 +403,12 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
     }
 
     if (punto_libre_cercano == -1) {
-        return search_index; // No se encontró camino libre (todo bloqueado)
+        return search_index; //no se encontró camino libre (todo bloqueado)
     }
 
-    // 3. Encontrar los Límites del Hueco que contiene a PuntoInicialLibre
+    //Encontrar los Límites del Hueco que contiene a PuntoInicialLibre
 
-    // Límite derecho (Buscando el obstáculo y el borde del sensor hacia abajo)
     int limite_derecho = punto_libre_cercano;
-    // Mientras no sea el índice 0 Y el índice anterior esté libre
     while (limite_derecho > 0 && obstacleSet.find(limite_derecho - 1) == obstacleSet.end()) {
         limite_derecho--;
     }
@@ -427,7 +422,7 @@ int Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int 
 
     // 4. Calcular el Centro del Hueco y devolverlo
     int centro_del_hueco = (limite_izquierdo + limite_derecho) / 2;
-    int angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
+    float angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
 
     float angle_to_follow;
 
@@ -576,6 +571,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 if(centro>10){
                     obstacle_detected_in_path = true;
                 }
+                
             }
 
             if(msg->ranges[k+427]<0.7){
