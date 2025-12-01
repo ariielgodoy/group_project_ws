@@ -389,12 +389,14 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
         int numUp = search_index + delta;
         int numDown = search_index - delta;
 
-        if (numUp < array_size && obstacleSet.find(numUp) == obstacleSet.end()) {
+        // El 86 es solo para mirar maximo a los lados, nos dan igual los muros de detras
+
+        if (numUp < array_size - 86 && obstacleSet.find(numUp) == obstacleSet.end()) {
             punto_libre_cercano = numUp;
             break;
         }
 
-        if (numDown >= 0 && obstacleSet.find(numDown) == obstacleSet.end()) {
+        if (numDown >= 86 && obstacleSet.find(numDown) == obstacleSet.end()) {
             punto_libre_cercano = numDown;
             break;
         }
@@ -404,19 +406,20 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
 
     if (punto_libre_cercano == -1) {
         return search_index; //no se encontró camino libre (todo bloqueado)
+        //AQUI DEBERIAMOS TIRAR PARA ATRAS
     }
 
     //Encontrar los Límites del Hueco que contiene a PuntoInicialLibre
 
     int limite_derecho = punto_libre_cercano;
-    while (limite_derecho > 0 && obstacleSet.find(limite_derecho - 1) == obstacleSet.end()) {
+    while (limite_derecho > 86 && obstacleSet.find(limite_derecho - 1) == obstacleSet.end()) {
         limite_derecho--;
     }
     
     // Límite izquierdo (Buscando el obstáculo y el borde del sensor hacia arriba)
     int limite_izquierdo = punto_libre_cercano;
     // Mientras no sea el último índice Y el índice siguiente esté libre
-    while (limite_izquierdo < array_size - 1 && obstacleSet.find(limite_izquierdo + 1) == obstacleSet.end()) {
+    while (limite_izquierdo < array_size - 86 && obstacleSet.find(limite_izquierdo + 1) == obstacleSet.end()) {
         limite_izquierdo++;
     }
 
@@ -424,75 +427,71 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     int centro_del_hueco = (limite_izquierdo + limite_derecho) / 2;
     float angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
 
+    /////////////////////////////////////////////////////////////////////
+    //////Por ahora lo que funciona muy bien es el ir por el centro//////
+    /////////////////////////////////////////////////////////////////////
+
+
     float angle_to_follow;
-
-    /*if(limite_izquierdo == msg->ranges.size()-1 or limite_derecho == 0 or limite_izquierdo-limite_derecho < 90){
-        //////////////////////////////////////////////////////////////
-        //AQUI SE PODRIA PONER UNA FUNCION PARA NO REPETIR EL CODIGO//
-        //////////////////////////////////////////////////////////////
-        float angle_wall;
+    RCLCPP_INFO(this->get_logger(),"Por el centro hasta que se diga lo contrario");
+    ////////////////////////////////////////////////////////////////
+    /////El error es el calculo del angulo con respecto al robot////
+    ////////////////////////////////////////////////////////////////
+    float angle_wall;
+    if(limite_izquierdo == msg->ranges.size()-86){
         RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
-        if(limite_izquierdo == msg->ranges.size()-1){
-            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-2];
-            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano-30];
-            float ultimo_punto_ocupado_angulo = -(punto_libre_cercano-2)*angle_increment + M_PI/2;
-            float penultimo_punto_ocupado_angulo = -(punto_libre_cercano-30)*angle_increment + M_PI/2;
+        RCLCPP_INFO(this->get_logger(),"Muro derecho");
+        float ultimo_punto_ocupado_rango = msg->ranges[limite_derecho-12];
+        float penultimo_punto_ocupado_rango = msg->ranges[limite_derecho-25];
+        float ultimo_punto_ocupado_angulo = (limite_derecho-12)*angle_increment - 86*angle_increment;
+        float penultimo_punto_ocupado_angulo = (limite_derecho-25)*angle_increment - 86*angle_increment;
 
-            //lo convierto a coordenadas locales del robot
-            float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
-            float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
-            float x_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
-            float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
+        //lo convierto a coordenadas locales del robot
+        float y_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
+        float y_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
+        float x_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
+        float x_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
 
-            
-            float m_num = (x_ultimo-x_penultimo);
-            float m_den = (y_ultimo-y_penultimo);
-            if(m_num < 0){
-                angle_wall = -angle_wall;
-            }
-            else if(m_den< 0){
-                m_den = -m_den;
-            }
-            angle_wall = atan(m_num/m_den);
+        
+        float m_num = (x_ultimo-x_penultimo);
+        float m_den = (y_ultimo-y_penultimo);
+        angle_wall = atan(m_num/m_den);
 
+        RCLCPP_INFO(this->get_logger(), "Muro derecho, angulo calculado: %f", angle_wall*360/(2*M_PI));
 
-            angle_to_follow = angle_wall;
-
-            
-
-        }else if(limite_derecho == 0){
-            float ultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+2];
-            float penultimo_punto_ocupado_rango = msg->ranges[punto_libre_cercano+30];
-            float ultimo_punto_ocupado_angulo = (punto_libre_cercano+2)*angle_increment - M_PI/2;
-            float penultimo_punto_ocupado_angulo = (punto_libre_cercano+30)*angle_increment - M_PI/2;
-
-            float y_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
-            float y_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
-            float x_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
-            float x_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
-
-            //lo convierto a coordenadas locales del robot
-            float m_den = (y_ultimo-y_penultimo);
-            float m_num = (x_ultimo-x_penultimo);
-
-            if(m_num < 0){
-                angle_wall = -angle_wall;
-            }
-            else if(m_den > 0){
-                m_den = -m_den;
-            }
-            angle_wall = atan(m_num/m_den);
-
-            angle_to_follow = angle_wall;
+        if(angle_wall<0){
+            angulo_a_seguir = angle_wall + M_PI/2;
+        }else{
+            angulo_a_seguir = angle_wall - M_PI/2;
         }
         
-        if (angle_to_follow > M_PI) {
-            angle_to_follow -= 2 * M_PI;
-        } else if (angle_to_follow <= -M_PI) {
-            angle_to_follow += 2 * M_PI;
+
+    }else if(limite_derecho <= 86){
+        RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
+        RCLCPP_INFO(this->get_logger(),"Muro izquierdo");
+        float ultimo_punto_ocupado_rango = msg->ranges[limite_izquierdo+12];
+        float penultimo_punto_ocupado_rango = msg->ranges[limite_izquierdo+25];
+        float ultimo_punto_ocupado_angulo = ((limite_izquierdo+12)*angle_increment - 86*angle_increment);
+        float penultimo_punto_ocupado_angulo = ((limite_izquierdo+25)*angle_increment - 86*angle_increment);
+
+        float y_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
+        float y_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
+        float x_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
+        float x_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
+
+        //lo convierto a coordenadas locales del robot
+        float m_den = (y_ultimo-y_penultimo);
+        float m_num = (x_ultimo-x_penultimo);
+
+        angle_wall = atan(m_num/m_den);
+        RCLCPP_INFO(this->get_logger(), "Muro izquierdo, angulo calculado: %f", angle_wall*360/(2*M_PI));
+        if(angle_wall>0){
+            angulo_a_seguir = angle_wall - M_PI/2;
+        }else{
+            angulo_a_seguir = angle_wall + M_PI/2;
         }
-        angulo_a_seguir = angle_to_follow;
-    }*/
+    }
+
     return angulo_a_seguir;
 }
 
@@ -634,18 +633,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 obstacles.insert(obstacles.end(), current_cluster.begin(), current_cluster.end());
             }
 
-            // --- Resto de process_laser_info continúa... ---
-            if(!obstacles.empty()){
-                for(int h = 0; h < obstacles.size(); h++){
-                    RCLCPP_INFO(this->get_logger(), "%d", obstacles[h]);
-                }
-            }
            
-            angulo_libre = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
+            angle_to_move = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
 
-
-
-            angle_to_move = angulo_libre;
             RCLCPP_INFO(this->get_logger(), "Angulo_elegido: %f", angle_to_move*360/(2*M_PI));
 
 
@@ -654,15 +644,12 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             /////////////////////////////////////////////////////////////////////////////////////////
 
 
-            float angle_difference = angle_to_move;
-            float computing_real_angle_difference = atan2(sin(angle_difference), cos(angle_difference));
-
-            if(fabs(computing_real_angle_difference) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
+            if(fabs(angle_to_move) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
                                                         //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
                                                         // para reajustar la direccion
                 close_enough = 1;
                 below = 2;
-            }else if(computing_real_angle_difference > 0){
+            }else if(angle_to_move > 0){
                 below = 1;
                 close_enough = 0;
             }else{
@@ -671,7 +658,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
 
             if(close_enough == 1){
-                fixing_direction = this->PID_for_aiming(angle_difference);
+                fixing_direction = this->PID_for_aiming(angle_to_move);
             }
 
         }
