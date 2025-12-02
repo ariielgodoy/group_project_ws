@@ -391,6 +391,7 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     }
 
     if (punto_libre_cercano == -1) {
+        RCLCPP_INFO(this->get_logger(), "No hay camino libre");
         return search_index; //no se encontró camino libre (todo bloqueado)
         //AQUI DEBERIAMOS TIRAR PARA ATRAS
     }
@@ -419,6 +420,9 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     bool right_wall = false;
     bool left_wall = false;
     bool front_wall = false;
+    int derecha = 0;
+    int izquierda = 0;
+    int centro = 0;
     for(int k = 86; k <171; k++){
         if(msg->ranges[k]<0.7){
             derecha++;
@@ -473,9 +477,9 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
         RCLCPP_INFO(this->get_logger(), "Muro derecho, angulo calculado: %f", angle_wall*360/(2*M_PI));
 
         if(angle_wall<0){
-            angulo_a_seguir = angle_wall + M_PI/2;
+            angulo_a_seguir = angle_wall + M_PI/2 + 20*2*M_PI/360;
         }else{
-            angulo_a_seguir = angle_wall - M_PI/2;
+            angulo_a_seguir = angle_wall - M_PI/2 + 20*2*M_PI/360;
         }
         
 
@@ -499,9 +503,9 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
         angle_wall = atan(m_num/m_den);
         RCLCPP_INFO(this->get_logger(), "Muro izquierdo, angulo calculado: %f", angle_wall*360/(2*M_PI));
         if(angle_wall>0){
-            angulo_a_seguir = angle_wall - M_PI/2;
+            angulo_a_seguir = angle_wall - M_PI/2 - 20*2*M_PI/360;
         }else{
-            angulo_a_seguir = angle_wall + M_PI/2;
+            angulo_a_seguir = angle_wall + M_PI/2 - 20*2*M_PI/360;
         }
     }
 
@@ -553,7 +557,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         if(search_index-20 < 0){
             start_sweep = 0;
             RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
-            obstacle_detected_in_path = true;
+            //obstacle_detected_in_path = true;
         }else{
             start_sweep = search_index-20;
         }
@@ -561,13 +565,27 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         if(search_index + 20 > array_size){
             end_sweep = array_size - 1;
             RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
-            obstacle_detected_in_path = true;
+            //obstacle_detected_in_path = true;
         }else{
             end_sweep = search_index + 20;
         }
         int izquierda = 0;
         int centro = 0;
         int derecha = 0;
+        ////////////////////////////////////////////////////////////////////////////
+        
+        bool camino_bloqueado = false;
+        // 2. Buscar obstáculos en el barrido central
+        for(int i = start_sweep; i < end_sweep; i++){ 
+            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < 2){
+                obstacle_detected_in_path = true;
+                break; // Detener en cuanto se encuentra el primero
+            }
+        }
+
+
+        
+        //Mirar a los lados y al centro
         for(int k = 86; k <171; k++){
             if(msg->ranges[k]<0.7){
                 derecha++;
@@ -593,16 +611,6 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 }
             }
         }
-        ////////////////////////////////////////////////////////////////////////////
-        
-        
-        // 2. Buscar obstáculos en el barrido central
-        for(int i = start_sweep; i < end_sweep; i++){ 
-            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < 2){
-                obstacle_detected_in_path = true;
-                break; // Detener en cuanto se encuentra el primero
-            }
-        }
         /////////////////////////////////////////////////////////////////
         OBSTACLE_FOUND = obstacle_detected_in_path;
         MOVE_TO_GOAL = !obstacle_detected_in_path;
@@ -621,7 +629,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             for(int j = 0; j < array_size; j++){
                 
                 // Condición: ¿Es un punto de obstáculo potencial?
-                bool is_obstacle_point = (msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < msg->range_max);
+                bool is_obstacle_point = (msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < 1.5);
 
                 if(is_obstacle_point){
                     // Si es un obstáculo potencial, añadirlo al clúster actual
