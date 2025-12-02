@@ -47,8 +47,8 @@ Warrior::Warrior(): Node ("robot_warrior")
                 // Se definen los publicadores y suscriptores necesarios.
                 pub1_ = create_publisher<rosgame_msgs::msg::RosgameTwist>( "/" + code + "/cmd_vel", 10 );
                 pub2_ = create_publisher<rosgame_msgs::msg::RosgamePoint>( "/" + code + "/goal_x_y", 10 );
-                sub1_ = create_subscription<sensor_msgs::msg::LaserScan>( "/" + code + "/laser_scan", 10, std::bind(&Warrior::process_laser_info, this, std::placeholders::_1));
-                sub2_ = create_subscription<std_msgs::msg::String>( "/" + code + "/scene_info", 10, std::bind(&Warrior::process_scene_info, this, std::placeholders::_1));
+                sub1_ = create_subscription<sensor_msgs::msg::LaserScan>( "/" + code + "/laser_scan", 1, std::bind(&Warrior::process_laser_info, this, std::placeholders::_1));
+                sub2_ = create_subscription<std_msgs::msg::String>( "/" + code + "/scene_info", 1, std::bind(&Warrior::process_scene_info, this, std::placeholders::_1));
                 RCLCPP_INFO(this->get_logger(), "Player registered. Starting simulation.");           
             }
         }
@@ -216,21 +216,10 @@ std::vector<std::vector<float>> Warrior::trajectory_computation()
 float Warrior::PID_for_aiming(float angle){
 
     float Kp = 2; //2 ha ido bien
-    float Kd = 0.1; // 0.1 ha ido bien tmb
-    float DELTA_T = 0.1;
-
-    float angle_diff = (angle-gamma);
-    float current_error = atan2(sinf(angle_diff), cosf(angle_diff));
+    float P = Kp * angle;
 
 
-    float P = Kp * current_error;
-
-    float derivative = (current_error - previous_error) / DELTA_T;
-    //float D = Kd * derivative;
-
-    //previous_error = current_error;
-
-    return P;//+D;
+    return P;
 }
 
 
@@ -250,9 +239,6 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
     float y_for_the_angle_coins = y_coin - pos_y;
 
     float angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
-
-
-    float angle = angle_coins;
     
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -261,7 +247,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
     ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-    float angle_diff = angle - gamma;
+    float angle_diff = angle_coins - gamma;
     float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
 
     if(fabs(computing_real_angle_diff) < 0.14){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
@@ -278,7 +264,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
     }
 
     if(close_enough == 1){
-        fixing_direction = this->PID_for_aiming(angle);
+        fixing_direction = this->PID_for_aiming(computing_real_angle_diff);
     }else{
         previous_error = 0;
     }
@@ -430,7 +416,34 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     /////////////////////////////////////////////////////////////////////
     //////Por ahora lo que funciona muy bien es el ir por el centro//////
     /////////////////////////////////////////////////////////////////////
+    bool right_wall = false;
+    bool left_wall = false;
+    bool front_wall = false;
+    for(int k = 86; k <171; k++){
+        if(msg->ranges[k]<0.7){
+            derecha++;
+            if(derecha>10){
+                right_wall = true;
+            }
+            
+        }
 
+
+        if(msg->ranges[k+214] < 0.5){
+            centro++;
+            if(centro>10){
+                front_wall = true;
+            }
+            
+        }
+
+        if(msg->ranges[k+427]<0.7){
+            izquierda++;
+            if(izquierda>10){
+                left_wall = true;
+            }
+        }
+    }
 
     float angle_to_follow;
     RCLCPP_INFO(this->get_logger(),"Por el centro hasta que se diga lo contrario");
@@ -438,7 +451,7 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     /////El error es el calculo del angulo con respecto al robot////
     ////////////////////////////////////////////////////////////////
     float angle_wall;
-    if(limite_izquierdo == msg->ranges.size()-86){
+    if(limite_izquierdo == msg->ranges.size()-86 or (right_wall && front_wall)){
         RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
         RCLCPP_INFO(this->get_logger(),"Muro derecho");
         float ultimo_punto_ocupado_rango = msg->ranges[limite_derecho-12];
@@ -466,7 +479,7 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
         }
         
 
-    }else if(limite_derecho <= 86){
+    }else if(limite_derecho <= 86 or (left_wall && front_wall)){
         RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
         RCLCPP_INFO(this->get_logger(),"Muro izquierdo");
         float ultimo_punto_ocupado_rango = msg->ranges[limite_izquierdo+12];
