@@ -125,7 +125,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     }
     players_pos_array = players_pos_array_aux;
 
-    if(!trajectory_calculated && !skills_pos_array.empty() && battery > 70){
+    if(!trajectory_calculated && !skills_pos_array.empty() && battery > 90){
         trajectory = this->trajectory_computation();
         trajectory_calculated = true;
         
@@ -223,7 +223,7 @@ float Warrior::PID_for_aiming(float angle){
 }
 
 
-std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
+std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(bool to_coin_or_to_battery, int coin_battery_position){
 
     if(trajectory.empty()) return {};
 
@@ -231,8 +231,18 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
     float fixing_direction = 0;
     float close_enough;
     float below;
-    float x_coin = trajectory[0][0];
-    float y_coin = trajectory[0][1];
+
+    float x_coin, y_coin;
+
+
+    if(to_coin_or_to_battery){
+        x_coin = trajectory[coin_battery_position][0];
+        y_coin = trajectory[coin_battery_position][1];
+    }
+    else{
+        x_coin = chargers_pos_array[coin_battery_position][0];
+        y_coin = chargers_pos_array[coin_battery_position][1];
+    }
 
     float euclidean_distance_coins = compute_euclidean_distance(x_coin, pos_x, y_coin, pos_y);
     float x_for_the_angle_coins = x_coin - pos_x;
@@ -240,6 +250,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
     float angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
     
+
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////
     ////// En vez de hacerlo con los if, lo he cambiado para calcularlo con atan2, que funciona mejor//
@@ -249,6 +260,13 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
     float angle_diff = angle_coins - gamma;
     float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
+
+    //if (!to_coin_or_to_battery /*&& fabs(computing_real_angle_diff) > (80.0 * M_PI / 180.0)*/) {
+    //    RCLCPP_INFO(this->get_logger(), 
+    //                "Ángulo muy grande hacia cargador, salto a moneda.");
+    //    return euclidean_distance_and_angle_to_coin(true, 0); 
+    //}
+
 
     if(fabs(computing_real_angle_diff) < 0.14){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
                                                 //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
@@ -265,11 +283,9 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 
     if(close_enough == 1){
         fixing_direction = this->PID_for_aiming(computing_real_angle_diff);
-    }else{
-        previous_error = 0;
     }
 
-    if(euclidean_distance_coins < 0.3){
+    if(euclidean_distance_coins < 0.3 && to_coin_or_to_battery){
         trajectory.erase(trajectory.begin());
     }
 
@@ -284,9 +300,32 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(){
 /////////////////////////////////////////////////////////////////////////////
 //////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, float front_distance)
+void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, float front_distance, bool go_back)
 {
-    std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(); //Para calcular la velocidad si esta cerca o lejos
+    bool to_coin_or_to_battery = true; //true es moneda y false es bateria
+    int battery_to_follow = 0;
+    if(!chargers_pos_array.empty()){
+        float x_battery = chargers_pos_array[0][0];
+        float y_battery = chargers_pos_array[0][1];
+        float distance_to_battery;
+        int i = 0;
+
+        for (const auto &skill_pos : chargers_pos_array)
+        {   
+            //RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]); 
+            x_battery = skill_pos[0];
+            y_battery = skill_pos[1];
+            distance_to_battery = this->compute_euclidean_distance(x_battery, pos_x, y_battery, pos_y);
+
+            if(distance_to_battery < 2 && battery < 30 && distance_to_battery > 0.1){
+                to_coin_or_to_battery = false;
+                RCLCPP_INFO(this->get_logger(), "Al cargador");
+                battery_to_follow = i;
+            }
+            i++;
+        }
+    }
+    std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(to_coin_or_to_battery, battery_to_follow); //Para calcular la velocidad si esta cerca o lejos
     if (!datos.empty()){
         float closest_distance_to_skill = datos[0];
         float below = datos[1];
@@ -328,22 +367,27 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
             RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
         }
         else if(OBSTACLE_FOUND){
-            movement.vel.linear.x = 0.1;
-            RCLCPP_INFO(this->get_logger(), "Should be avoiding");
-            if (below_avoiding == 1){
-                movement.vel.angular.z = 0.2;
-                RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba nigga");
-            }else if(below_avoiding == 0){
-                movement.vel.angular.z = -0.2;
-                RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo nigga");
+            if(go_back){
+                movement.vel.linear.x = -0.4;
+                movement.vel.angular.z = 0;
             }
+            else{
+                movement.vel.linear.x = 0.1;
+                RCLCPP_INFO(this->get_logger(), "Should be avoiding");
+                if (below_avoiding == 1){
+                    movement.vel.angular.z = 0.2;
+                    RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba nigga");
+                }else if(below_avoiding == 0){
+                    movement.vel.angular.z = -0.2;
+                    RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo nigga");
+                }
 
-            if(close_enough_avoiding == 1){
-                RCLCPP_INFO(this->get_logger(), "Suficientemente cercano nigga");
-                movement.vel.linear.x = 0.2;
-                movement.vel.angular.z = fixing_direction_avoiding;
+                if(close_enough_avoiding == 1){
+                    RCLCPP_INFO(this->get_logger(), "Suficientemente cercano nigga");
+                    movement.vel.linear.x = 0.2;
+                    movement.vel.angular.z = fixing_direction_avoiding;
+                }
             }
-
         }
 
 
@@ -356,7 +400,7 @@ void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float clo
 
 
 
-float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg){
+float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index, const sensor_msgs::msg::LaserScan::SharedPtr msg, bool right_wall, bool left_wall, bool front_wall){
 
     double angle_min = msg->angle_min;
     std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
@@ -392,6 +436,7 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
 
     if (punto_libre_cercano == -1) {
         RCLCPP_INFO(this->get_logger(), "No hay camino libre");
+        search_index = -404;
         return search_index; //no se encontró camino libre (todo bloqueado)
         //AQUI DEBERIAMOS TIRAR PARA ATRAS
     }
@@ -417,37 +462,6 @@ float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, in
     /////////////////////////////////////////////////////////////////////
     //////Por ahora lo que funciona muy bien es el ir por el centro//////
     /////////////////////////////////////////////////////////////////////
-    bool right_wall = false;
-    bool left_wall = false;
-    bool front_wall = false;
-    int derecha = 0;
-    int izquierda = 0;
-    int centro = 0;
-    for(int k = 86; k <171; k++){
-        if(msg->ranges[k]<0.7){
-            derecha++;
-            if(derecha>10){
-                right_wall = true;
-            }
-            
-        }
-
-
-        if(msg->ranges[k+214] < 0.5){
-            centro++;
-            if(centro>10){
-                front_wall = true;
-            }
-            
-        }
-
-        if(msg->ranges[k+427]<0.7){
-            izquierda++;
-            if(izquierda>10){
-                left_wall = true;
-            }
-        }
-    }
 
     float angle_to_follow;
     RCLCPP_INFO(this->get_logger(),"Por el centro hasta que se diga lo contrario");
@@ -540,6 +554,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     float below = 0;
     float fixing_direction = 0;
 
+    bool go_back = false;
 
 
     //Aqui busco el angulo de la moneda con respecto al robot para saber si esa parte esta ocupada
@@ -553,6 +568,8 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
         float euclidean_distance_coin = sqrt((desired_x-pos_x)*(desired_x-pos_x) + (desired_y-pos_y)*(desired_y-pos_y));
         bool obstacle_detected_in_path = false;
+
+        // Este es el indice del laser que se supone que debe detectar el laser para saber si hay obstaculo en el camino
         int search_index = array_size/2 + computing_real_angle_diff/angle_increment;
         if(search_index-20 < 0){
             start_sweep = 0;
@@ -583,34 +600,42 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
         }
 
+        bool front_wall = false;
+        bool left_wall = false;
+        bool right_wall = false;
+
 
         
         //Mirar a los lados y al centro
         for(int k = 86; k <171; k++){
-            if(msg->ranges[k]<0.7){
+            if(msg->ranges[k]<0.6){
                 derecha++;
                 if(derecha>10){
                     obstacle_detected_in_path = true;
+                    right_wall = true;
                 }
                 
             }
 
 
-            if(msg->ranges[k+214] < 0.7){
+            if(msg->ranges[k+214] < 0.6){
                 centro++;
                 if(centro>10){
                     obstacle_detected_in_path = true;
+                    front_wall = true;
                 }
                 
             }
 
-            if(msg->ranges[k+427]<0.7){
+            if(msg->ranges[k+427]<0.6){
                 izquierda++;
                 if(izquierda>10){
                     obstacle_detected_in_path = true;
+                    left_wall = true;
                 }
             }
         }
+
         /////////////////////////////////////////////////////////////////
         OBSTACLE_FOUND = obstacle_detected_in_path;
         MOVE_TO_GOAL = !obstacle_detected_in_path;
@@ -655,7 +680,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
 
            
-            angle_to_move = encontrarCercanoNoObstaculo(obstacles, search_index, msg);
+            angle_to_move = encontrarCercanoNoObstaculo(obstacles, search_index, msg, right_wall, left_wall, front_wall);
 
             RCLCPP_INFO(this->get_logger(), "Angulo_elegido: %f", angle_to_move*360/(2*M_PI));
 
@@ -663,9 +688,12 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             /////////////////////////////////////////////////////////////////////////////////////////
             ////Codigo repetido, cambiar por subprograma/////////////////////////////////////////////
             /////////////////////////////////////////////////////////////////////////////////////////
-
-
-            if(fabs(angle_to_move) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
+            
+            // EL VALOR DE ANGLE TO MOVE SE LE PUEDE PASAR AL SUBPROGRAMA DE MOVIMIENTO PARA PODER MOVERSE Y AQUI SOLO PROCESO EL LASER
+            if(angle_to_move == -404){
+                go_back = true;
+            }
+            else if(fabs(angle_to_move) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
                                                         //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
                                                         // para reajustar la direccion
                 close_enough = 1;
@@ -688,7 +716,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     }
     RCLCPP_INFO(this->get_logger(), "close_enough: %f, below: %f", close_enough, below);
-    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, front_distance);
+
+    //AQUI PODRIA CAMBIAR LA PARTE DEL SUBPROGRAMA, LE PASO DIRECTAMENTE EL ANGULO Y HAGO LO DE CLOSE_ENOUGH O INCLUSO SIN EL CLOSE ENOUGH
+    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, front_distance, go_back);
 }
 
 
