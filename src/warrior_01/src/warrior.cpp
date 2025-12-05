@@ -261,11 +261,11 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(bool to_coin_or
     float angle_diff = angle_coins - gamma;
     float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
 
-    //if (!to_coin_or_to_battery /*&& fabs(computing_real_angle_diff) > (80.0 * M_PI / 180.0)*/) {
-    //    RCLCPP_INFO(this->get_logger(), 
-    //                "Ángulo muy grande hacia cargador, salto a moneda.");
-    //    return euclidean_distance_and_angle_to_coin(true, 0); 
-    //}
+    if (!to_coin_or_to_battery && fabs(computing_real_angle_diff) > (80.0 * M_PI / 180.0)) {
+        RCLCPP_INFO(this->get_logger(), 
+                    "Ángulo muy grande hacia cargador, salto a moneda.");
+        return euclidean_distance_and_angle_to_coin(true, 0); 
+    }
 
 
     if(fabs(computing_real_angle_diff) < 0.14){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
@@ -300,7 +300,7 @@ std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(bool to_coin_or
 /////////////////////////////////////////////////////////////////////////////
 //////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////
-void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, float front_distance, bool go_back)
+void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, float fixing_direction_avoiding, bool go_back)
 {
     bool to_coin_or_to_battery = true; //true es moneda y false es bateria
     int battery_to_follow = 0;
@@ -556,7 +556,6 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     bool go_back = false;
 
-
     //Aqui busco el angulo de la moneda con respecto al robot para saber si esa parte esta ocupada
     if(!trajectory.empty()){
         float desired_x = trajectory[0][0];
@@ -590,8 +589,6 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         int centro = 0;
         int derecha = 0;
         ////////////////////////////////////////////////////////////////////////////
-        
-        bool camino_bloqueado = false;
         // 2. Buscar obstáculos en el barrido central
         for(int i = start_sweep; i < end_sweep; i++){ 
             if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < 2){
@@ -607,8 +604,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
         
         //Mirar a los lados y al centro
-        for(int k = 86; k <171; k++){
-            if(msg->ranges[k]<0.6){
+        // miraba antes 30 grados (171), ahora miro 45 grado (214)
+        for(int k = 86; k < 214; k++){
+            if(msg->ranges[k]<0.5){
                 derecha++;
                 if(derecha>10){
                     obstacle_detected_in_path = true;
@@ -618,8 +616,11 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             }
 
 
-            if(msg->ranges[k+214] < 0.6){
+            if(msg->ranges[k+array_size/2 - 86 - 64] < 0.5){
                 centro++;
+                if(front_distance > msg->ranges[k+214]){
+                    front_distance = msg->ranges[k+214];
+                }
                 if(centro>10){
                     obstacle_detected_in_path = true;
                     front_wall = true;
@@ -627,7 +628,8 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 
             }
 
-            if(msg->ranges[k+427]<0.6){
+            // El barrido es de 128 y como no me importan los obstaculos superados, pues el barrido es de -90 a 90
+            if(msg->ranges[k + array_size - 1 - 86 - 128]<0.5){
                 izquierda++;
                 if(izquierda>10){
                     obstacle_detected_in_path = true;
@@ -690,7 +692,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
             /////////////////////////////////////////////////////////////////////////////////////////
             
             // EL VALOR DE ANGLE TO MOVE SE LE PUEDE PASAR AL SUBPROGRAMA DE MOVIMIENTO PARA PODER MOVERSE Y AQUI SOLO PROCESO EL LASER
-            if(angle_to_move == -404){
+            if(angle_to_move == -404 or front_distance < 0.45){
                 go_back = true;
             }
             else if(fabs(angle_to_move) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
@@ -710,15 +712,21 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
                 fixing_direction = this->PID_for_aiming(angle_to_move);
             }
 
+            if(trajectory.size() == 1){
+                recalcular = true;
+            }
+
         }
 
-
-
+    }
+    else if(recalcular){
+        trajectory = this->trajectory_computation();
+        recalcular = false;
     }
     RCLCPP_INFO(this->get_logger(), "close_enough: %f, below: %f", close_enough, below);
 
     //AQUI PODRIA CAMBIAR LA PARTE DEL SUBPROGRAMA, LE PASO DIRECTAMENTE EL ANGULO Y HAGO LO DE CLOSE_ENOUGH O INCLUSO SIN EL CLOSE ENOUGH
-    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, front_distance, go_back);
+    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, fixing_direction, go_back);
 }
 
 
