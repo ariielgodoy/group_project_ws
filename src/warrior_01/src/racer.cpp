@@ -3,7 +3,7 @@
 //MAPIR Research Group - Machine Perception and Intelligent Robotics
 //--------------------------------------------------------------------//
 
-#include "warrior_01/warrior.hpp"
+#include "warrior_01/racer.hpp"
 
 Warrior::Warrior(): Node ("robot_warrior")
 {
