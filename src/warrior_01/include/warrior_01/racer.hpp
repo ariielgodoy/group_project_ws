@@ -40,7 +40,7 @@ public:
 
     void erasing_accidentally_taken_coins();
 
-    void calculating_if_better_trajectory();
+    void calculating_if_better_trajectory();    
 
 
 
