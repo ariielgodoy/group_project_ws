@@ -142,9 +142,9 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
         {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
     }
     // DEBUGGING
-    /*
+    
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-
+    /*
     RCLCPP_INFO(this->get_logger(), "Battery level: '%f'", battery);
 
     RCLCPP_INFO(this->get_logger(), "Is teleport enabled? '%s'", (teleport_enabled ? "True" : "False"));

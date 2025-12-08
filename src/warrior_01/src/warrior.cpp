@@ -87,7 +87,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
 
     // Se obtienen las posiciones de bloques de habilidades de la clave "Skills_Positions" en el campo "FOV".
     std::vector<std::vector<float>> skills_pos_array_aux;
-    const Json::Value &skills_pos = JsonSceneData["FOV"]["Coins_Positions"];
+    const Json::Value &skills_pos = JsonSceneData["FOV"]["Skills_Positions"];
     for (const Json::Value &skill : skills_pos)
     {
         std::vector<float> skillData;
@@ -125,22 +125,14 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     }
     players_pos_array = players_pos_array_aux;
 
-    if(!trajectory_calculated && !skills_pos_array.empty() && battery > 97){
-        trajectory = this->trajectory_computation();
-        trajectory_calculated = true;
-        
-        for (const auto &coins_pos : trajectory)
-        {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", coins_pos[0], coins_pos[1]);  }
-    }
 
-
-    //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-    if (!skills_pos_array.empty())
+    RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
+    /*if (!skills_pos_array.empty())
     {
         RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
         for (const auto &skill_pos : skills_pos_array)
         {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
-    }
+    }*/
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
@@ -169,423 +161,199 @@ float Warrior::compute_euclidean_distance(float x1, float x2, float y1, float y2
     return distance;
 }
 
-std::vector<std::vector<float>> Warrior::trajectory_computation()
-{
-    //Algoritmo de nearest neighbour
-    size_t j;
-    size_t position_closest_distance;
-    float simulated_x_position = pos_x;
-    float simulated_y_position = pos_y;
-    std::vector<std::vector<float>> fixed_skills_pos_array = skills_pos_array;
-    std::vector<std::vector<float>> path;
-
-    if (!skills_pos_array.empty()){
-
-        std::vector<float> distances_coins;
-        while(!fixed_skills_pos_array.empty()){
-            distances_coins.clear();
-            float closest_distance_coins = 500;
-            for (const auto &skill_pos : fixed_skills_pos_array)  
-            {
-                float x = skill_pos[0];
-                float y = skill_pos[1];
-                float euclidean_distance_coins = compute_euclidean_distance(simulated_x_position, x, simulated_y_position, y);
-                distances_coins.push_back(euclidean_distance_coins); //No hace falta usar el contador para acceder a las posiciones
-                //Y no va a haber el problema del overflow que habia antes
-            }
-            //Fin del calculo de las distancias euclideas
-            //Inicio del calculo de la trayectoria
-            for(j = 0; j < distances_coins.size(); j++){
-                if(closest_distance_coins>distances_coins[j])
-                {
-                    closest_distance_coins = distances_coins[j];;
-                    position_closest_distance = j;
-                }
-            }
-            path.push_back(fixed_skills_pos_array[position_closest_distance]);
-            simulated_x_position = path.back()[0];
-            simulated_y_position = path.back()[1];
-            fixed_skills_pos_array.erase(fixed_skills_pos_array.begin() + position_closest_distance);
-        }   
-    }
-    return path;
-}
 
 
-float Warrior::PID_for_aiming(float angle){
+float Warrior::P_for_aiming(float angle){
 
     float Kp = 2; //2 ha ido bien
     float P = Kp * angle;
-
 
     return P;
 }
 
 
-std::vector<float> Warrior::euclidean_distance_and_angle_to_coin(bool to_coin_or_to_battery, int coin_battery_position){
 
-    if(trajectory.empty()) return {};
-
-    std::vector<float> datos;
-    float close_enough;
-    float below;
-
-    float x_coin, y_coin;
-
-
-    if(to_coin_or_to_battery){
-        x_coin = trajectory[coin_battery_position][0];
-        y_coin = trajectory[coin_battery_position][1];
-    }
-    else{
-        x_coin = chargers_pos_array[coin_battery_position][0];
-        y_coin = chargers_pos_array[coin_battery_position][1];
-    }
-
-    float euclidean_distance_coins = compute_euclidean_distance(x_coin, pos_x, y_coin, pos_y);
-    float x_for_the_angle_coins = x_coin - pos_x;
-    float y_for_the_angle_coins = y_coin - pos_y;
-
-    float angle_coins = atan2(y_for_the_angle_coins, x_for_the_angle_coins);
-    
-
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-    ////// En vez de hacerlo con los if, lo he cambiado para calcularlo con atan2, que funciona mejor//
-    ////// Ya gira en la direccion mas corta para dirigirse a la moneda////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-    float angle_diff = angle_coins - gamma;
-    float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
-
-    if (!to_coin_or_to_battery && fabs(computing_real_angle_diff) > (80.0 * M_PI / 180.0)) {
-        RCLCPP_INFO(this->get_logger(), 
-                    "Ángulo muy grande hacia cargador, salto a moneda");
-        return euclidean_distance_and_angle_to_coin(true, 0); 
-    }
-
-
-    if(fabs(computing_real_angle_diff) < 0.26){ //Si el valor absoluto de la diferencia de angulo esta entre -0.14 radianes y 0.14 radianes
-                                                //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
-                                                // para reajustar la direccion
-        close_enough = 1;
-        below = 2;
-    }else if(computing_real_angle_diff > 0){
-        below = 1;
-        close_enough = 0;
-    }else{
-        below = 0;
-        close_enough = 0;
-    }
-
-    if(euclidean_distance_coins < 0.3 && to_coin_or_to_battery){
-        trajectory.erase(trajectory.begin());
-    }
-
-    datos.push_back(euclidean_distance_coins);
-    datos.push_back(below);
-    datos.push_back(close_enough);
-    datos.push_back(computing_real_angle_diff);
-    return datos;
-}
-
-
-std::pair<bool, int> Warrior::choosing_coin_or_battery() {
-    bool to_coin_or_to_battery = true; // true es moneda y false es bateria
-    int battery_to_follow = 0;
-
-    if (!chargers_pos_array.empty()) {
-        float distance_to_battery;
-        int i = 0;
-
-        for (const auto &charger_pos : chargers_pos_array) {
-            float x_battery = charger_pos[0];
-            float y_battery = charger_pos[1];
-
-            
-            distance_to_battery = this->compute_euclidean_distance(x_battery, pos_x, y_battery, pos_y);
-
-            // La logica de decisión
-            if (distance_to_battery < 3 && battery < 50 && distance_to_battery > 0.1) {
-                to_coin_or_to_battery = false;
-                RCLCPP_INFO(this->get_logger(), "Al cargador");
-                battery_to_follow = i;
-                break;
-            }
-            i++;
-        }
-    }
-
-    return {to_coin_or_to_battery, battery_to_follow}; 
-}
-
-/////////////////////////////////////////////////////////////////////////////
-//////////POR AHORA FUNCIONA BIEN////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////
-void Warrior::perform_movement(bool MOVE_TO_GOAL, bool OBSTACLE_FOUND, float close_enough_avoiding, float below_avoiding, bool go_back, float angle)
+void Warrior::perform_movement(float angle)
 {
-    auto result = this->choosing_coin_or_battery();
-    bool to_coin_or_to_battery = result.first; //true es moneda y false es bateria
-    int battery_to_follow = result.second;
-    
-    std::vector<float> datos = this->euclidean_distance_and_angle_to_coin(to_coin_or_to_battery, battery_to_follow); //Para calcular la velocidad si esta cerca o lejos
-    if (!datos.empty()){
-        float closest_distance_to_skill = datos[0];
-        float below = datos[1];
-        float close_enough = datos[2];
-        float angle_for_coin_charger = datos[3];
+    rosgame_msgs::msg::RosgameTwist movement;
 
-        rosgame_msgs::msg::RosgameTwist movement;
+    movement.vel.linear.x = 0.2;
+    movement.vel.angular.z = this->P_for_aiming(angle);
 
-
-        // Reglas de movimiento referente a la distancia con las monedas
-        if(MOVE_TO_GOAL){
-            movement.vel.linear.x = 0.2;
-            RCLCPP_INFO(this->get_logger(),"Goin' for the Gs homie");
-            if (below == 1){
-                if(closest_distance_to_skill < 1 && fabs(angle_for_coin_charger) > 45*2*M_PI/360){
-                    movement.vel.linear.x = 0;
-                }
-                movement.vel.angular.z = this->PID_for_aiming(angle_for_coin_charger)/6;
-                RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba");
-            }else if(below == 0){
-                if(closest_distance_to_skill < 1.5 && fabs(angle_for_coin_charger) > 45*2*M_PI/360){
-                    movement.vel.linear.x = 0;
-                }
-                movement.vel.angular.z = this->PID_for_aiming(angle_for_coin_charger)/6;
-                RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo");
-            }
-            else if(close_enough == 1){
-                RCLCPP_INFO(this->get_logger(), "Suficientemente cercano");
-                movement.vel.linear.x = 0.8;
-                if(closest_distance_to_skill < 2){
-                    movement.vel.linear.x = 0.5 - ((4-2*closest_distance_to_skill)/10);
-                }
-                movement.vel.angular.z = this->PID_for_aiming(angle_for_coin_charger);
-            }
-
-
-            RCLCPP_INFO(this->get_logger(), "Close enough: %f", close_enough);
-            RCLCPP_INFO(this->get_logger(), "Below: %f", below);
-            RCLCPP_INFO(this->get_logger(), "Bateria: %f", battery);
-        }
-        else if(OBSTACLE_FOUND){
-            if(go_back){
-                movement.vel.linear.x = -0.5;
-                movement.vel.angular.z = this->PID_for_aiming(angle)/3;
-            }
-            else{
-                movement.vel.linear.x = 0.3;
-                RCLCPP_INFO(this->get_logger(), "Should be avoiding");
-                if (below_avoiding == 1){
-                    movement.vel.angular.z = this->PID_for_aiming(angle)/5;
-                    RCLCPP_INFO(this->get_logger(), "Ajustando para ir arriba(obst)");
-                }else if(below_avoiding == 0){
-                    movement.vel.angular.z = this->PID_for_aiming(angle)/5;
-                    RCLCPP_INFO(this->get_logger(), "Ajustando para ir hacia abajo(obst)");
-                }
-
-                if(close_enough_avoiding == 1){
-                    RCLCPP_INFO(this->get_logger(), "Suficientemente cercano(obst)");
-                    movement.vel.linear.x = 0.4;
-                    movement.vel.angular.z = this->PID_for_aiming(angle)*1.4;
-                }
-            }
-        }
-
-
-        // Publicar
-        movement.code = code;
-        this->pub1_->publish(movement);
-    }
+    movement.code = code;
+    this->pub1_->publish(movement);
 
 }
 
 
+void Warrior::computing_angle(std::pair<float, float> target){
+    double x = target.first;
+    double y = target.second;
 
-float Warrior::encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index_best, const sensor_msgs::msg::LaserScan::SharedPtr msg, bool right_wall, bool left_wall, bool front_wall){
+    double x_diff = x - pos_x;
+    double y_diff = y - pos_y;
 
-    double angle_min = msg->angle_min;
-    std::unordered_set<int> obstacleSet(obstacles.begin(), obstacles.end());
-    double angle_increment = msg->angle_increment;
-    int search_index = (684/2 + search_index_best)/2;
+    double global_angle = atan2(y_diff, x_diff);
 
-    int punto_libre_cercano = -1;
-    size_t delta = 1;
-    size_t array_size = msg->ranges.size();
+    double local_angle_diff = global_angle - gamma;
+    double real_local_angle_diff = (sin(local_angle_diff), cos(local_angle_diff));
 
-    while (delta < array_size) { // Límite de seguridad
-        size_t numUp = search_index + delta;
-        size_t numDown = search_index - delta;
 
-        // El 86 es solo para mirar maximo a los lados, nos dan igual los muros de detras
-
-        if (numUp < array_size - 86 && obstacleSet.find(numUp) == obstacleSet.end()) {
-            punto_libre_cercano = numUp;
-            break;
-        }
-
-        if (numDown >= 86 && obstacleSet.find(numDown) == obstacleSet.end()) {
-            punto_libre_cercano = numDown;
-            break;
-        }
-
-        delta++;
-    }
-
-    if (punto_libre_cercano == -1) {
-        RCLCPP_INFO(this->get_logger(), "No hay camino libre.");
-        search_index = -404;
-        return search_index; //no se encontró camino libre (todo bloqueado)
-        //AQUI DEBERIAMOS TIRAR PARA ATRAS
-    }
-
-    //Encontrar los Límites del Hueco que contiene a PuntoInicialLibre
-
-    size_t limite_derecho = punto_libre_cercano;
-    while (limite_derecho > 86 && obstacleSet.find(limite_derecho - 1) == obstacleSet.end()) {
-        limite_derecho--;
-    }
-    
-    // Límite izquierdo (Buscando el obstáculo y el borde del sensor hacia arriba)
-    size_t limite_izquierdo = punto_libre_cercano;
-    // Mientras no sea el último índice Y el índice siguiente esté libre
-    while (limite_izquierdo < array_size - 86 && obstacleSet.find(limite_izquierdo + 1) == obstacleSet.end()) {
-        limite_izquierdo++;
-    }
-
-    // 4. Calcular el Centro del Hueco y devolverlo
-    int centro_del_hueco = (limite_izquierdo + limite_derecho) / 2;
-    float angulo_a_seguir = centro_del_hueco*angle_increment+angle_min;
-
-    RCLCPP_INFO(this->get_logger(),"Por el centro hasta que se diga lo contrario");
-
-    float angle_wall;
-    if(limite_izquierdo == msg->ranges.size()-86 or (right_wall && front_wall)){
-        RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
-        RCLCPP_INFO(this->get_logger(),"Muro derecho");
-        float ultimo_punto_ocupado_rango = msg->ranges[limite_derecho-12];
-        float penultimo_punto_ocupado_rango = msg->ranges[limite_derecho-25];
-        float ultimo_punto_ocupado_angulo = (limite_derecho-12)*angle_increment - 86*angle_increment;
-        float penultimo_punto_ocupado_angulo = (limite_derecho-25)*angle_increment - 86*angle_increment;
-
-        //lo convierto a coordenadas locales del robot
-        float y_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
-        float y_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
-        float x_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
-        float x_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
-
-        
-        float m_num = (x_ultimo-x_penultimo);
-        float m_den = (y_ultimo-y_penultimo);
-        angle_wall = atan(m_num/m_den);
-
-        RCLCPP_INFO(this->get_logger(), "Muro derecho, angulo calculado: %f", angle_wall*360/(2*M_PI));
-
-        if(angle_wall<0){
-            angulo_a_seguir = angle_wall + M_PI/2 + 20*2*M_PI/360;
-        }else{
-            angulo_a_seguir = angle_wall - M_PI/2 + 20*2*M_PI/360;
-        }
-        
-
-    }else if(limite_derecho <= 86 or (left_wall && front_wall)){
-        RCLCPP_INFO(this->get_logger(),"Siguiendo el muro");
-        RCLCPP_INFO(this->get_logger(),"Muro izquierdo");
-        float ultimo_punto_ocupado_rango = msg->ranges[limite_izquierdo+12];
-        float penultimo_punto_ocupado_rango = msg->ranges[limite_izquierdo+25];
-        float ultimo_punto_ocupado_angulo = ((limite_izquierdo+12)*angle_increment - 86*angle_increment);
-        float penultimo_punto_ocupado_angulo = ((limite_izquierdo+25)*angle_increment - 86*angle_increment);
-
-        float y_ultimo = ultimo_punto_ocupado_rango * cos(ultimo_punto_ocupado_angulo);
-        float y_penultimo = penultimo_punto_ocupado_rango * cos(penultimo_punto_ocupado_angulo);
-        float x_ultimo = ultimo_punto_ocupado_rango * sin(ultimo_punto_ocupado_angulo);
-        float x_penultimo = penultimo_punto_ocupado_rango * sin(penultimo_punto_ocupado_angulo);
-
-        //lo convierto a coordenadas locales del robot
-        float m_den = (y_ultimo-y_penultimo);
-        float m_num = (x_ultimo-x_penultimo);
-
-        angle_wall = atan(m_num/m_den);
-        RCLCPP_INFO(this->get_logger(), "Muro izquierdo, angulo calculado: %f", angle_wall*360/(2*M_PI));
-        if(angle_wall>0){
-            angulo_a_seguir = angle_wall - M_PI/2 - 20*2*M_PI/360;
-        }else{
-            angulo_a_seguir = angle_wall + M_PI/2 - 20*2*M_PI/360;
-        }
-    }
-
-    return angulo_a_seguir;
+    this->perform_movement(real_local_angle_diff);
 }
 
 
-void Warrior::erasing_accidentally_taken_coins(){
-    if(!trajectory.empty() && !skills_pos_array.empty() && skills_pos_array.size() != trajectory.size()){
-        const float COIN_MATCH_THRESHOLD = 0.1f; //Por el error de los float
-        std::vector<std::vector<float>> new_trajectory;
+void Warrior::most_density_of_resources(){
+    float best_density_score = -1.0f;
+    std::pair<float, float> best_resource_target = {0.0f, 0.0f};
+    float radius = 5.0f; //Radio para considerar que las cajas estan agrupadas
 
-        for (const auto &planned_coin : trajectory) 
-        {
-            bool coin_still_exists = false;
+    //Iteramos por cada recurso para evaluar su entorno
+    for (size_t i = 0; i < skills_pos_array.size(); ++i) {
+        float current_x = skills_pos_array[i][0];
+        float current_y = skills_pos_array[i][1];
+        int count = 0;
 
-
-            for (const auto &actual_coin : skills_pos_array) 
-            {
-                float distance = this->compute_euclidean_distance(planned_coin[0], actual_coin[0], planned_coin[1], actual_coin[1]);
-
-                if (distance < COIN_MATCH_THRESHOLD) {
-                    coin_still_exists = true;
-                    break;
-                }
+        //Comparamos esta caja con todas las demás
+        for (size_t j = 0; j < skills_pos_array.size(); ++j) {
+            float dist = compute_euclidean_distance(current_x, skills_pos_array[j][0], 
+                                                   current_y, skills_pos_array[j][1]);
+            if (dist <= radius) {
+                count++;
             }
+        }
+
+        //Puntuamos: Densidad = número de cajas / distancia al robot (para no irnos muy lejos)
+        float dist_to_robot = compute_euclidean_distance(pos_x, current_x, pos_y, current_y);
+        float score = (float)count / (dist_to_robot * 0.5f); //El 0.5 pondera la cercanía
+
+        if (score > best_density_score) {
+            best_density_score = score;
+            best_resource_target = {current_x, current_y};
+        }
+    }
+    this->computing_angle(best_resource_target);
+}
+
+
+std::pair<float, float> Warrior::get_nearest_enemy_pos(){
+
+}
+
+
+void Warrior::going_for_safest_resource_escape() {
+    float min_dist_to_me = 1000.0f;
+    std::pair<float, float> safest_resource_target = {0.0f, 0.0f};
+    bool found = false;
+
+    std::pair<float, float> enemy = this->get_nearest_enemy_pos();
+
+    float my_dist_to_enemy = this->compute_euclidean_distance(pos_x, enemy.first, pos_y, enemy.second);
+
+    for (size_t i = 0; i < skills_pos_array.size(); ++i) {
+        float res_x = skills_pos_array[i][0];
+        float res_y = skills_pos_array[i][1];
+
+        float res_dist_to_enemy = compute_euclidean_distance(res_x, enemy.first, res_y, enemy.second);
+
+
+        if (res_dist_to_enemy > my_dist_to_enemy) {
+            float dist_to_me = this->compute_euclidean_distance(pos_x, res_x, pos_y, res_y);
             
-            //si la moneda existe en el inventario, la incluimos en el nuevo plan.
-            if (coin_still_exists) {
-                new_trajectory.push_back(planned_coin);
-            } 
-            // Si no existe, fue recogida y la omitimos (la eliminamos del plan).
-        }
-
-        // Reemplazamos el plan antiguo con el nuevo plan limpio.
-        if (trajectory.size() != new_trajectory.size()) {
-            RCLCPP_WARN(this->get_logger(), "Sincronización: Se eliminaron %zu monedas del plan de ruta.", 
-                        trajectory.size() - new_trajectory.size());
-        }
-        trajectory = move(new_trajectory); // Para pasar de un sitio a otro
-    }
-}
-
-
-void Warrior::calculating_if_better_trajectory(){
-    if(trajectory.size() > 1){
-        int best_candidate_index = 0;
-        for(size_t i = 1; i < trajectory.size(); i++){
-            float new_x = trajectory[i][0];
-            float new_y = trajectory[i][1];
-
-            float current_x = trajectory[0][0];
-            float current_y = trajectory[0][1];
-
-            float new_star_euclidean_distance = this->compute_euclidean_distance(new_x, pos_x, new_y, pos_y);
-            float current_star_euclidean_distance = this->compute_euclidean_distance(current_x, pos_x, current_y, pos_y);
-
-
-            if(new_star_euclidean_distance < current_star_euclidean_distance - 1){
-                best_candidate_index = i;
+            if (dist_to_me < min_dist_to_me) {
+                min_dist_to_me = dist_to_me;
+                safest_resource_target = {res_x, res_y};
+                found = true;
             }
         }
-        if(best_candidate_index != 0){
-            swap(trajectory[0], trajectory[best_candidate_index]);
-            RCLCPP_INFO(this->get_logger(), "Trayectoria reordenada");
+    }
+
+    if (!found) {
+        // Calculamos el vector que va desde el enemigo hacia el robot
+        float diff_x = pos_x - enemy.first;
+        float diff_y = pos_y - enemy.second;
+
+        // Normalizamos y creamos un punto a 10 metros en esa dirección
+        float magnitude = sqrt(diff_x * diff_x + diff_y * diff_y);
+        
+        // Evitar división por cero
+        if (magnitude > 0.1f) {
+            safest_resource_target.first = pos_x + (diff_x / magnitude) * 10.0f;
+            safest_resource_target.second = pos_y + (diff_y / magnitude) * 10.0f;
         }
+    }
+
+    this->computing_angle(safest_resource_target);
+}
+
+
+void Warrior::go_for_nearest_charger(){
+    
+    this->computing_angle();
+}
+
+
+void Warrior::crashing_into_weakest_enemy(){
+
+
+}
+
+//Maquina de estados para escoger accion
+void Warrior::FSM(int number_of_players_around) {
+    if (battery < 40.0 && current_state != State::RETREATING) {
+        current_state = State::RETREATING;
+    }
+
+    switch (current_state) {
+        case State::SEARCHING_RESOURCES:
+            this->most_density_of_resources();
+            
+            if (hammer_enabled || shield_enabled) 
+                current_state = State::ENGAGING;
+            else if (enemy_with_advantage_near) 
+                current_state = State::SCAPING;
+            break;
+        
+        case State::SCAPING:
+            this->going_for_safest_resource_escape(); 
+            
+            if (!enemy_with_advantage_near)
+                current_state = State::SEARCHING_RESOURCES;
+            break;
+
+        case State::ENGAGING:
+            this->crashing_into_weakest_enemy();
+
+            if (!hammer_enabled && !shield_enabled) {
+                current_state = (number_of_players_around < 2) ? State::ENGAGING : State::SEARCHING_RESOURCES;
+            }
+            break;
+
+        case State::RETREATING:
+            this->go_for_nearest_charger();
+            if (battery > 90.0) // Cargamos un poco más para tener margen
+                current_state = State::SEARCHING_RESOURCES;
+            break;
     }
 }
 
+
+void Warrior::computing_data_for_FSM(){
+    int number_of_players_around = 0;
+    for (const auto &players_pos : players_pos_array){
+        double x = players_pos[0];
+        double y = players_pos[1];
+
+        if(this->compute_euclidean_distance(x, pos_x, y, pos_y)<3){
+            number_of_players_around++;
+        }
+    }
+    //FSM para las decisiones del robot
+    this->FSM(number_of_players_around);
+}
 
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
-
     int array_size = msg->ranges.size();
     double angle_increment = msg->angle_increment;
 
@@ -593,169 +361,49 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     //Flags para el programa de movimiento
     
     double front_distance = msg->range_max;
-    int start_sweep;
-    int end_sweep;
-    std::vector<int> obstacles;
-    float angle_to_move;
+    int izquierda = 0;
+    int centro = 0;
+    int derecha = 0;
 
-    float close_enough = 0;
-    float below = 0;
+    bool front_wall = false;
+    bool left_wall = false;
+    bool right_wall = false;
 
-    bool go_back = false;
-
-    //Aqui busco el angulo de la moneda con respecto al robot para saber si esa parte esta ocupada
-    if(!trajectory.empty()){
-
-        this->erasing_accidentally_taken_coins();
-
-        if(trajectory.empty()){
-            return;
-        }
-
-        this->calculating_if_better_trajectory();
-
-        float desired_x = trajectory[0][0]; //Aqui debo poner la moneda o la bateria
-        float desired_y = trajectory[0][1];
-        float angle_to_objective = atan2(desired_y - pos_y, desired_x - pos_x);
-        float angle_diff = angle_to_objective - gamma;
-        float computing_real_angle_diff = atan2(sin(angle_diff), cos(angle_diff));
-
-        float euclidean_distance_coin = sqrt((desired_x-pos_x)*(desired_x-pos_x) + (desired_y-pos_y)*(desired_y-pos_y));
-        bool obstacle_detected_in_path = false;
-
-        // Este es el indice del laser que se supone que debe detectar el laser para saber si hay obstaculo en el camino
-        int search_index = array_size/2 + computing_real_angle_diff/angle_increment;
-        if(search_index-20 < 0){
-            start_sweep = 0;
-            RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
-        }else{
-            start_sweep = search_index-20;
-        }
-
-        if(search_index + 20 > array_size){
-            end_sweep = array_size - 1;
-            RCLCPP_INFO(this->get_logger(), "Fuera del rango del laser");
-        }else{
-            end_sweep = search_index + 20;
-        }
-        int izquierda = 0;
-        int centro = 0;
-        int derecha = 0;
-
-        for(int i = start_sweep; i < end_sweep; i++){ 
-            if(msg->ranges[i] < euclidean_distance_coin && msg->ranges[i] < 2){
-                obstacle_detected_in_path = true;
-                break; // Detener en cuanto se encuentra el primero
-            }
-        }
-
-        bool front_wall = false;
-        bool left_wall = false;
-        bool right_wall = false;
-
-        
-        //Mirar a los lados y al centro
-        // miraba antes 30 grados (171), ahora miro 45 grado (214)
-        for(int k = 86; k < 257; k++){
-            if(msg->ranges[k]<0.5){
-                derecha++;
-                if(derecha>10){
-                    obstacle_detected_in_path = true;
-                    right_wall = true;
-                }
-                
-            }
-
-
-            if(msg->ranges[k+array_size/2 - 86 - 86] < 0.5){
-                centro++;
-                if(front_distance > msg->ranges[k+214]){
-                    front_distance = msg->ranges[k+214];
-                }
-                if(centro>20){
-                    obstacle_detected_in_path = true;
-                    front_wall = true;
-                }
-                
-            }
-
-            // El barrido es de 128 y como no me importan los obstaculos superados, pues el barrido es de -90 a 90
-            if(msg->ranges[k + array_size - 1 - 86 - 171]<0.5){
-                izquierda++;
-                if(izquierda>10){
-                    obstacle_detected_in_path = true;
-                    left_wall = true;
-                }
-            }
-        }
-
-        /////////////////////////////////////////////////////////////////
-        OBSTACLE_FOUND = obstacle_detected_in_path;
-        MOVE_TO_GOAL = !obstacle_detected_in_path;
-        
-
-        if(OBSTACLE_FOUND){
-            const int MIN_OBSTACLE_POINTS = 10; 
-
-            //Identificar y agrupar obstaculos potenciales
-            std::vector<int> current_cluster;
-
-            for(int j = 0; j < array_size; j++){
-                
-                bool is_obstacle_point = (msg->ranges[j] < euclidean_distance_coin && msg->ranges[j] < 1.1);
-
-                if(is_obstacle_point){
-                    current_cluster.push_back(j);
-                } else {
-                    if(current_cluster.size() >= MIN_OBSTACLE_POINTS){
-                        obstacles.insert(obstacles.end(), current_cluster.begin(), current_cluster.end());
-                    }
-                    current_cluster.clear();
-                }
-            }
-
-            if(current_cluster.size() >= MIN_OBSTACLE_POINTS){
-                obstacles.insert(obstacles.end(), current_cluster.begin(), current_cluster.end());
-            }
-
-           
-            angle_to_move = encontrarCercanoNoObstaculo(obstacles, search_index, msg, right_wall, left_wall, front_wall);
-
-            RCLCPP_INFO(this->get_logger(), "Angulo_elegido: %f", angle_to_move*360/(2*M_PI));
-
-            
-            if(angle_to_move == -404 or front_distance < 0.45){
-                go_back = true;
-            }
-            else if(fabs(angle_to_move) < 0.2){ //Si el valor absoluto de la diferencia de angulo esta entre -0.2 radianes y 0.2 radianes
-                                                        //Enviamos close enough y se empieza a calcular el PD para que se mueva el robot y no se pare
-                                                        // para reajustar la direccion
-                close_enough = 1;
-                below = 2;
-            }else if(angle_to_move > 0){
-                below = 1;
-                close_enough = 0;
-            }else{
-                below = 0;
-                close_enough = 0;
-            }
-
-            if(trajectory.size() == 1){
-                recalcular = true;
-            }
-
-        }
-
-    }
-    else if((recalcular or trajectory.empty()) && trajectory_calculated){
-        trajectory = this->trajectory_computation();
-        recalcular = false;
-        RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
-        for (const auto &skill_pos : trajectory)
-        {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
-    }
     
-    this->perform_movement(MOVE_TO_GOAL, OBSTACLE_FOUND, close_enough, below, go_back, angle_to_move);
+    //Mirar a los lados y al centro
+    for(int k = 86; k < 257; k++){
+        if(msg->ranges[k]<0.5){
+            derecha++;
+            if(derecha>10){
+                right_wall = true;
+            }
+            
+        }
+
+
+        if(msg->ranges[k+array_size/2 - 86 - 86] < 0.5){
+            centro++;
+            if(front_distance > msg->ranges[k+214]){
+                front_distance = msg->ranges[k+214];
+            }
+            if(centro>20){
+                front_wall = true;
+            }
+            
+        }
+
+        // El barrido es de 128 y como no me importan los obstaculos superados, pues el barrido es de -90 a 90
+        if(msg->ranges[k + array_size - 1 - 86 - 171]<0.5){
+            izquierda++;
+            if(izquierda>10){
+                left_wall = true;
+            }
+        }
+    }
+
+    this->creating_players_data();
+
+    this->computing_data_for_FSM();
 }
 
 

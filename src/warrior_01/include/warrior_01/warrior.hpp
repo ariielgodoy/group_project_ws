@@ -18,43 +18,47 @@ public:
     Warrior();
     ~Warrior();
 
-    bool trajectory_calculated = false;
-    
-    std::vector<std::vector<float>> trajectory;
-    
-    std::vector<std::vector<float>> trajectory_computation();
-    
-    void perform_movement(bool MOVE_TO_GOAL, bool FOLLOW_WALL, float close_enough_avoiding, float below_avoiding, bool go_back, float angle);
 
 
-    float encontrarCercanoNoObstaculo(const std::vector<int>& obstacles, int search_index_best, const sensor_msgs::msg::LaserScan::SharedPtr msg, bool right_wall, bool left_wall, bool front_wall);
+    bool MOVE_TO_GOAL = true;
+    bool OBSTACLE_FOUND = false;
+    
+    void perform_movement(float angle);
+
+    void computing_angle(std::pair<float, float> target);
 
     float compute_euclidean_distance(float x1, float x2, float y1, float y2);
 
-    bool recalcular = false;
-    bool MOVE_TO_GOAL = true;
-    bool OBSTACLE_FOUND = false;
     // Función para procesar el sensor láser.
     void process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
+    float P_for_aiming(float angle);
 
-    void erasing_accidentally_taken_coins();
+    std::pair<float, float> get_nearest_enemy_pos();
 
-    void calculating_if_better_trajectory();
+    void most_density_of_resources();
 
+    void going_for_safest_resource_escape();
 
+    void crashing_into_weakest_enemy();
+
+    void go_for_nearest_charger();
+
+    void Warrior::FSM(int number_of_players_around);
+
+    enum class State {
+        SEARCHING_RESOURCES,
+        ENGAGING,
+        SCAPING,
+        RETREATING
+    };
+
+    State current_state = State::SEARCHING_RESOURCES;
+
+    void computing_data_for_FSM();
 
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);
-
-    float previous_error = 0;
-    float PID_for_aiming(float angle);
-
-
-    //std::vector<float> euclidean_distance_and_angle_to_coins();
-    std::vector<float> euclidean_distance_and_angle_to_coin(bool to_coin_or_to_battery, int coin_battery_position);
-
-    std::pair<bool, int> choosing_coin_or_battery();
 
     
     //puedes añadir mas funciones si lo crees oportuno
