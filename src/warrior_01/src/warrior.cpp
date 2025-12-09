@@ -237,7 +237,23 @@ void Warrior::most_density_of_resources(){
 
 
 std::pair<float, float> Warrior::get_nearest_enemy_pos(){
+    float min_dist = 9999.0f;
+    std::pair<float, float> nearest_coords = {0.0f, 0.0f};
+    
+    //Iteramos sobre todos los enemigos detectados
+    for (const auto& enemy : players_pos_array) {
+        float enemy_x = enemy[0];
+        float enemy_y = enemy[1];
 
+        float dist = compute_euclidean_distance(pos_x, enemy_x, pos_y, enemy_y);
+        
+        if (dist < min_dist) {
+            min_dist = dist;
+            nearest_coords = {enemy_x, enemy_y};
+        }
+    }
+
+    return nearest_coords;
 }
 
 
@@ -288,14 +304,31 @@ void Warrior::going_for_safest_resource_escape() {
 
 
 void Warrior::go_for_nearest_charger(){
-    
-    this->computing_angle();
+    float min_dist = 1000.0f; // Inicializamos con una distancia grande
+    std::pair<float, float> nearest_charger = {0.0f, 0.0f};
+    bool charger_found = false;
+
+    for (const auto& charger : chargers_pos_array) {
+        float charger_x = charger[0];
+        float charger_y = charger[1];
+        
+        float dist = compute_euclidean_distance(pos_x, charger_x, pos_y, charger_y);
+        
+        if (dist < min_dist) {
+            min_dist = dist;
+            nearest_charger = {charger_x, charger_y};
+            charger_found = true;
+        }
+    }
+
+    if (charger_found) {
+        this->computing_angle(nearest_charger);
+    }
 }
 
 
 void Warrior::crashing_into_weakest_enemy(){
-
-
+    
 }
 
 //Maquina de estados para escoger accion

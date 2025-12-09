@@ -19,7 +19,6 @@ public:
     ~Warrior();
 
 
-
     bool MOVE_TO_GOAL = true;
     bool OBSTACLE_FOUND = false;
     
@@ -99,4 +98,19 @@ private:
 
     // Variables auxiliares.
     // cualquier otra variable que puedas necesitar
+    //Estructura para almacenar información de cada enemigo
+    struct EnemyInfo {
+        int id;
+        float x, y;
+
+        bool has_powerup = false; 
+        double powerup_expiry = 0.0;
+        
+        double last_seen = 0.0;
+    };
+
+    std::map<int, EnemyInfo> tracked_enemies;
+    int next_enemy_id = 0;
+    const double POWERUP_DURATION = 40.0;
+
 };
