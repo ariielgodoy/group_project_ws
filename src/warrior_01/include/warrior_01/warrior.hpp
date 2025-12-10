@@ -43,7 +43,7 @@ public:
 
     void go_for_nearest_charger();
 
-    void Warrior::FSM(int number_of_players_around);
+    void FSM(int number_of_players_around, bool enemy_with_advantage_near);
 
     enum class State {
         SEARCHING_RESOURCES,
@@ -55,6 +55,12 @@ public:
     State current_state = State::SEARCHING_RESOURCES;
 
     void computing_data_for_FSM();
+
+    bool is_item_present_now(const std::vector<float>& last_item_pos, const std::vector<std::vector<float>>& current_skills_list);
+
+    std::vector<std::vector<float>> last_skills_pos_array;
+    void process_enemy_and_item_data();
+
 
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);
@@ -104,7 +110,7 @@ private:
         float x, y;
 
         bool has_powerup = false; 
-        double powerup_expiry = 0.0;
+        double powerup_expiry = 50;
         
         double last_seen = 0.0;
     };

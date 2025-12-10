@@ -39,18 +39,18 @@ if(BUILD_TESTING)
 endif()
 
 # INSTANCIA Nº0 (WARRIOR) 
-#add_executable(warrior src/warrior.cpp src/main_warrior.cpp)
-add_executable(racer src/racer.cpp src/main_racer.cpp)
-target_link_libraries(racer jsoncpp) 
-#target_link_libraries(warrior jsoncpp) 
+add_executable(warrior src/warrior.cpp src/main_warrior.cpp)
+#add_executable(racer src/racer.cpp src/main_racer.cpp)
+#target_link_libraries(racer jsoncpp) 
+target_link_libraries(warrior jsoncpp) 
 
 install(TARGETS
-   racer
-   #warrior
+   #racer
+   warrior
    DESTINATION lib/${PROJECT_NAME})
    
-ament_target_dependencies(racer
-                          #warrior
+ament_target_dependencies(#racer
+                          warrior
                           rosgame_bridge
                           rosgame_msgs
                           rclcpp

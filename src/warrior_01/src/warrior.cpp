@@ -49,7 +49,7 @@ Warrior::Warrior(): Node ("robot_warrior")
                 pub2_ = create_publisher<rosgame_msgs::msg::RosgamePoint>( "/" + code + "/goal_x_y", 10 );
                 sub1_ = create_subscription<sensor_msgs::msg::LaserScan>( "/" + code + "/laser_scan", 1, std::bind(&Warrior::process_laser_info, this, std::placeholders::_1));
                 sub2_ = create_subscription<std_msgs::msg::String>( "/" + code + "/scene_info", 1, std::bind(&Warrior::process_scene_info, this, std::placeholders::_1));
-                RCLCPP_INFO(this->get_logger(), "Player registered. Starting simulation.");           
+                RCLCPP_INFO(this->get_logger(), "Player registered. Starting simulation.");
             }
         }
     }
@@ -101,6 +101,7 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     // Las plataformas de recarga están en posiciones fijas durante toda la simulación.
     // Objetivo: buscar las cinco plataformas y almacenarlas todas en la lista "chargers_pos_array".
     const Json::Value &chargers_pos = JsonSceneData["FOV"]["Chargers_Positions"];
+    chargers_pos_array.clear();
     for (const Json::Value &charger : chargers_pos)
     {
         std::vector<float> chargerData;
@@ -126,13 +127,13 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
     players_pos_array = players_pos_array_aux;
 
 
-    RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-    /*if (!skills_pos_array.empty())
+    //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
+    if (!skills_pos_array.empty())
     {
         RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
         for (const auto &skill_pos : skills_pos_array)
         {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
-    }*/
+    }
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
@@ -165,7 +166,7 @@ float Warrior::compute_euclidean_distance(float x1, float x2, float y1, float y2
 
 float Warrior::P_for_aiming(float angle){
 
-    float Kp = 2; //2 ha ido bien
+    float Kp = 0.7;
     float P = Kp * angle;
 
     return P;
@@ -178,6 +179,7 @@ void Warrior::perform_movement(float angle)
     rosgame_msgs::msg::RosgameTwist movement;
 
     movement.vel.linear.x = 0.2;
+    RCLCPP_INFO(this->get_logger(), "Angulo: %f", angle);
     movement.vel.angular.z = this->P_for_aiming(angle);
 
     movement.code = code;
@@ -196,7 +198,7 @@ void Warrior::computing_angle(std::pair<float, float> target){
     double global_angle = atan2(y_diff, x_diff);
 
     double local_angle_diff = global_angle - gamma;
-    double real_local_angle_diff = (sin(local_angle_diff), cos(local_angle_diff));
+    double real_local_angle_diff = atan2(sin(local_angle_diff), cos(local_angle_diff));
 
 
     this->perform_movement(real_local_angle_diff);
@@ -223,15 +225,14 @@ void Warrior::most_density_of_resources(){
             }
         }
 
-        //Puntuamos: Densidad = número de cajas / distancia al robot (para no irnos muy lejos)
-        float dist_to_robot = compute_euclidean_distance(pos_x, current_x, pos_y, current_y);
-        float score = (float)count / (dist_to_robot * 0.5f); //El 0.5 pondera la cercanía
+        float score = (float)count; //El 0.5 pondera la cercanía
 
-        if (score > best_density_score) {
+        if (score + 1 > best_density_score) {
             best_density_score = score;
             best_resource_target = {current_x, current_y};
         }
     }
+    RCLCPP_INFO(this->get_logger(), "Recurso objetivo [X]: %f , [Y]:%f", best_resource_target.first, best_resource_target.second);
     this->computing_angle(best_resource_target);
 }
 
@@ -298,7 +299,7 @@ void Warrior::going_for_safest_resource_escape() {
             safest_resource_target.second = pos_y + (diff_y / magnitude) * 10.0f;
         }
     }
-
+    RCLCPP_INFO(this->get_logger(), "Recurso objetivo [X]: %f , [Y]:%f", safest_resource_target.first, safest_resource_target.second);
     this->computing_angle(safest_resource_target);
 }
 
@@ -314,13 +315,14 @@ void Warrior::go_for_nearest_charger(){
         
         float dist = compute_euclidean_distance(pos_x, charger_x, pos_y, charger_y);
         
-        if (dist < min_dist) {
+        if (dist + 1 < min_dist) {
             min_dist = dist;
             nearest_charger = {charger_x, charger_y};
             charger_found = true;
         }
     }
 
+    RCLCPP_INFO(this->get_logger(), "Cargador objetivo [X]: %f , [Y]:%f", nearest_charger.first, nearest_charger.second);
     if (charger_found) {
         this->computing_angle(nearest_charger);
     }
@@ -328,26 +330,59 @@ void Warrior::go_for_nearest_charger(){
 
 
 void Warrior::crashing_into_weakest_enemy(){
-    
+    float min_dist_to_vulnerable = 9999.0f; // Buscamos la distancia más corta
+    std::pair<float, float> target_coords = {0.0f, 0.0f};
+    bool found_vulnerable_target = false;
+
+
+    for (const auto& pair : tracked_enemies) {
+        const EnemyInfo& enemy = pair.second;
+        
+        if (!enemy.has_powerup) {
+            
+            float dist = compute_euclidean_distance(pos_x, enemy.x, pos_y, enemy.y);
+
+            // Elegimos el desprotegido más cercano (criterio de selección)
+            if (dist < min_dist_to_vulnerable) {
+                min_dist_to_vulnerable = dist;
+                target_coords = {enemy.x, enemy.y};
+                found_vulnerable_target = true;
+            }
+        }
+    }
+
+    if (found_vulnerable_target) {
+        // Moverse al objetivo vulnerable
+        this->computing_angle(target_coords);
+        
+    } 
+    else {
+        // Si no hay kills fáciles, abortamos el estado ENGAGING
+        this->current_state = State::SEARCHING_RESOURCES;
+    }
 }
 
 //Maquina de estados para escoger accion
-void Warrior::FSM(int number_of_players_around) {
+void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) {
     if (battery < 40.0 && current_state != State::RETREATING) {
         current_state = State::RETREATING;
     }
 
     switch (current_state) {
         case State::SEARCHING_RESOURCES:
+            RCLCPP_INFO(this->get_logger(), "Buscando recursos");
             this->most_density_of_resources();
             
             if (hammer_enabled || shield_enabled) 
                 current_state = State::ENGAGING;
             else if (enemy_with_advantage_near) 
                 current_state = State::SCAPING;
+            else
+                current_state = State::SEARCHING_RESOURCES;
             break;
         
         case State::SCAPING:
+            RCLCPP_INFO(this->get_logger(), "RUN NIGGA RUN");
             this->going_for_safest_resource_escape(); 
             
             if (!enemy_with_advantage_near)
@@ -355,6 +390,7 @@ void Warrior::FSM(int number_of_players_around) {
             break;
 
         case State::ENGAGING:
+            RCLCPP_INFO(this->get_logger(), "Kiere sentirla en el pecho?");
             this->crashing_into_weakest_enemy();
 
             if (!hammer_enabled && !shield_enabled) {
@@ -363,8 +399,9 @@ void Warrior::FSM(int number_of_players_around) {
             break;
 
         case State::RETREATING:
+            RCLCPP_INFO(this->get_logger(), "Ara welvo");
             this->go_for_nearest_charger();
-            if (battery > 90.0) // Cargamos un poco más para tener margen
+            if (battery > 90.0)
                 current_state = State::SEARCHING_RESOURCES;
             break;
     }
@@ -373,24 +410,155 @@ void Warrior::FSM(int number_of_players_around) {
 
 void Warrior::computing_data_for_FSM(){
     int number_of_players_around = 0;
-    for (const auto &players_pos : players_pos_array){
-        double x = players_pos[0];
-        double y = players_pos[1];
+    bool enemy_with_advantage_near = false;
+    const float DANGER_THRESHOLD = 3; // 3 metros, umbral de proximidad crítica
 
-        if(this->compute_euclidean_distance(x, pos_x, y, pos_y)<3){
+    // Iteramos sobre la base de datos de enemigos trackeados
+    for (const auto& pair : tracked_enemies) {
+        const EnemyInfo& enemy = pair.second;
+        
+        float dist = this->compute_euclidean_distance(enemy.x, pos_x, enemy.y, pos_y);
+
+        if (dist < DANGER_THRESHOLD) {
             number_of_players_around++;
+            
+            // Si el enemigo esta cerca Y tiene has_powerup activo, peligro
+            if (enemy.has_powerup) {
+                enemy_with_advantage_near = true;
+                break;
+            }
         }
     }
-    //FSM para las decisiones del robot
-    this->FSM(number_of_players_around);
+    
+    // FSM para las decisiones del robot
+    this->FSM(number_of_players_around, enemy_with_advantage_near);
 }
+
+
+bool Warrior::is_item_present_now(
+    const std::vector<float>& last_item_pos, 
+    const std::vector<std::vector<float>>& current_skills_list) 
+{
+    const float POSITION_TOLERANCE = 0.1f; 
+    
+    if (last_item_pos.size() < 2) {
+        return false; 
+    }
+
+    float last_x = last_item_pos[0];
+    float last_y = last_item_pos[1];
+
+    //Iteramos sobre todos los ítems en la lista actual
+    for (const auto& current_pos : current_skills_list) {
+        if (current_pos.size() < 2) continue; 
+
+        float current_x = current_pos[0];
+        float current_y = current_pos[1];
+
+        //Calculamos la distancia euclidea entre la posicion anterior y la actual
+        float dist = compute_euclidean_distance(last_x, current_x, last_y, current_y);
+
+        //Si la distancia es menor que la tolerancia, el item persiste en la misma ubicación
+        if (dist < POSITION_TOLERANCE) {
+            return true; 
+        }
+    }
+
+    return false; //El item ya no se encuentra en esa posición (fue recogido)
+}
+
+
+void Warrior::process_enemy_and_item_data() {
+    double now = this->get_clock()->now().seconds();
+    float max_association_dist = 1.0f; // Distancia máxima para considerar el mismo enemigo
+    float pickup_threshold = 0.8f;      // Distancia máxima para inferir la recogida
+
+    // --- A. LIMPIEZA DE ENEMIGOS ELIMINADOS y EXPIRACIÓN DE POWER-UPS ---
+    
+    // Paso A1: Eliminar enemigos no vistos (los que han sido eliminados)
+    for (auto it = tracked_enemies.begin(); it != tracked_enemies.end(); ) {
+        if (now - it->second.last_seen > 1.0) { // Si no lo hemos visto en 1.0s, lo borramos
+             it = tracked_enemies.erase(it);
+        } else {
+            // Paso A2: Quitar power-ups caducados
+            if (it->second.has_powerup && now > it->second.powerup_expiry) {
+                it->second.has_powerup = false;
+            }
+            ++it;
+        }
+    }
+
+    // --- B. RASTREO (Tracking) y Actualización de Posición ---
+    
+    // Lista de power-ups del ciclo ANTERIOR (requiere que guardes skills_pos_array de la vez anterior)
+    const auto& last_skills = this->last_skills_pos_array; 
+    
+    for (const auto& pos : players_pos_array) {
+        float new_x = pos[0];
+        float new_y = pos[1];
+        int associated_id = -1;
+        float min_dist = max_association_dist;
+
+        for (auto& [id, info] : tracked_enemies) {
+            float dist = compute_euclidean_distance(new_x, info.x, new_y, info.y);
+            if (dist < min_dist) {
+                min_dist = dist;
+                associated_id = id;
+            }
+        }
+
+
+        if (associated_id != -1) {
+            tracked_enemies[associated_id].x = new_x;
+            tracked_enemies[associated_id].y = new_y;
+            tracked_enemies[associated_id].last_seen = now;
+        } else {
+            // Nuevo enemigo detectado
+            EnemyInfo new_enemy;
+            new_enemy.id = next_enemy_id++;
+            new_enemy.x = new_x;
+            new_enemy.y = new_y;
+            new_enemy.last_seen = now;
+            tracked_enemies[new_enemy.id] = new_enemy;
+            associated_id = new_enemy.id;
+        }
+        
+        // Solo intentamos inferir si el enemigo NO tiene ya un power-up activo
+        if (associated_id != -1 && !tracked_enemies[associated_id].has_powerup) {
+            
+            // Comparar con el estado anterior de skills_pos_array para inferir recolección
+            for (const auto& last_skill_pos : last_skills) {
+                
+                // Si este ítem estaba AHORA y no está en la lista actual, fue recogido
+                if (!is_item_present_now(last_skill_pos, skills_pos_array)) {
+                    
+                    float dist_to_pickup_spot = compute_euclidean_distance(new_x, last_skill_pos[0], new_y, last_skill_pos[1]);
+                    
+                    if (dist_to_pickup_spot < pickup_threshold) {
+                        // Inferencia exitosa: El enemigo recogio ALGO.
+                        tracked_enemies[associated_id].has_powerup = true;
+                        tracked_enemies[associated_id].powerup_expiry = now + POWERUP_DURATION; 
+
+                        break; 
+                    }
+                }
+            }
+        }
+    }
+
+    this->last_skills_pos_array = skills_pos_array;
+}
+
+
 
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
     int array_size = msg->ranges.size();
     double angle_increment = msg->angle_increment;
 
-
+    if(autopilot_enabled){
+        RCLCPP_INFO(this->get_logger(), "Piloto automatico activado");
+    }
     //Flags para el programa de movimiento
     
     double front_distance = msg->range_max;
@@ -434,7 +602,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         }
     }
 
-    this->creating_players_data();
+    this->process_enemy_and_item_data();
 
     this->computing_data_for_FSM();
 }
