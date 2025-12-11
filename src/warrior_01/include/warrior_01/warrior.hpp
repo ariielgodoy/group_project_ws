@@ -61,6 +61,7 @@ public:
     std::vector<std::vector<float>> last_skills_pos_array;
     void process_enemy_and_item_data();
 
+    void avoidance_maneuver(bool front_wall, bool left_wall, bool right_wall);
 
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);

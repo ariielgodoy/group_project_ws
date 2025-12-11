@@ -7,7 +7,7 @@
 
 Warrior::Warrior(): Node ("robot_warrior")
 {
-    warrior_nick = "JackTheBotRipper";
+    warrior_nick = "warrior_01";
     int cont = 0;
     
     // Se crea un cliente de servicio y una solicitud para lanzar el servicio.
@@ -128,12 +128,9 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
 
 
     //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-    if (!skills_pos_array.empty())
-    {
-        RCLCPP_INFO(this->get_logger(), "Skills Positions Array:");
-        for (const auto &skill_pos : skills_pos_array)
-        {   RCLCPP_INFO(this->get_logger(), "[X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
-    }
+    RCLCPP_INFO(this->get_logger(), "Players Positions Array:");
+    for (const auto &skill_pos : players_pos_array)
+    {   RCLCPP_INFO(this->get_logger(), "Enemigos: [X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
@@ -373,7 +370,7 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
             RCLCPP_INFO(this->get_logger(), "Buscando recursos");
             this->most_density_of_resources();
             
-            if (hammer_enabled || shield_enabled) 
+            if ((hammer_enabled || shield_enabled) && !players_pos_array.empty()) 
                 current_state = State::ENGAGING;
             else if (enemy_with_advantage_near) 
                 current_state = State::SCAPING;
@@ -549,10 +546,23 @@ void Warrior::process_enemy_and_item_data() {
     this->last_skills_pos_array = skills_pos_array;
 }
 
+void Warrior::avoidance_maneuver(bool front_wall, bool left_wall, bool right_wall){
+    if(left_wall && front_wall && !right_wall){
+        this->perform_movement(-45*2*M_PI/360);
+    }else if(!left_wall && front_wall && right_wall){
+        this->perform_movement(45*2*M_PI/360);
+    }else if(front_wall && !front_wall && left_wall){
+        this->perform_movement(0);
+    }else if(!front_wall && front_wall && !left_wall){
+        this->perform_movement(120*2*M_PI/360); //Aqui deberia hacer algo para ir hacia atras
+    }
 
+}
 
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
+    RCLCPP_INFO(this->get_logger(), "Tamaño del array: %zu", msg->ranges.size());
+
     int array_size = msg->ranges.size();
     double angle_increment = msg->angle_increment;
 
@@ -570,10 +580,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
     bool left_wall = false;
     bool right_wall = false;
 
-    
     //Mirar a los lados y al centro
     for(int k = 86; k < 257; k++){
-        if(msg->ranges[k]<0.5){
+        if(msg->ranges[k] < 0.8){
             derecha++;
             if(derecha>10){
                 right_wall = true;
@@ -582,8 +591,9 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         }
 
 
-        if(msg->ranges[k+array_size/2 - 86 - 86] < 0.5){
+        if(msg->ranges[k+array_size/2 - 86 - 86] < 0.8){
             centro++;
+            //RCLCPP_INFO(this->get_logger(), "Centro: %d", centro);
             if(front_distance > msg->ranges[k+214]){
                 front_distance = msg->ranges[k+214];
             }
@@ -594,7 +604,7 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
         }
 
         // El barrido es de 128 y como no me importan los obstaculos superados, pues el barrido es de -90 a 90
-        if(msg->ranges[k + array_size - 1 - 86 - 171]<0.5){
+        if(msg->ranges[k + array_size - 1 - 86 - 171] < 0.8){
             izquierda++;
             if(izquierda>10){
                 left_wall = true;
@@ -604,7 +614,14 @@ void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr ms
 
     this->process_enemy_and_item_data();
 
-    this->computing_data_for_FSM();
+    if (front_wall && (left_wall || right_wall)) {
+        RCLCPP_INFO(this->get_logger(), "Evitando");
+        this->avoidance_maneuver(front_wall, left_wall, right_wall); 
+    }
+    else{
+        RCLCPP_INFO(this->get_logger(), "FSM");
+        this->computing_data_for_FSM();
+    }
 }
 
 
