@@ -22,7 +22,7 @@ public:
     bool MOVE_TO_GOAL = true;
     bool OBSTACLE_FOUND = false;
     
-    void perform_movement(float angle);
+    void perform_movement(float angle, float distance, float front_distance);
 
     void computing_angle(std::pair<float, float> target);
 
@@ -33,12 +33,15 @@ public:
 
     float P_for_aiming(float angle);
 
+    float P_for_velocity(float angle);
+
     std::pair<float, float> get_nearest_enemy_pos();
 
     void most_density_of_resources();
 
     void going_for_safest_resource_escape();
 
+    std::pair<float, float> current_attack_target;
     void crashing_into_weakest_enemy();
 
     void go_for_nearest_charger();
@@ -61,7 +64,7 @@ public:
     std::vector<std::vector<float>> last_skills_pos_array;
     void process_enemy_and_item_data();
 
-    void avoidance_maneuver(bool front_wall, bool left_wall, bool right_wall);
+    void avoidance_maneuver(bool front_wall, bool left_wall, bool right_wall, float front_distance);
 
     // Función para procesar la información de la escena.
     void process_scene_info(const std_msgs::msg::String::SharedPtr msg);

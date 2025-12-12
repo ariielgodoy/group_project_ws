@@ -45,7 +45,7 @@ Warrior::Warrior(): Node ("robot_warrior")
             else
             {   
                 // Se definen los publicadores y suscriptores necesarios.
-                pub1_ = create_publisher<rosgame_msgs::msg::RosgameTwist>( "/" + code + "/cmd_vel", 10 );
+                pub1_ = create_publisher<rosgame_msgs::msg::RosgameTwist>( "/" + code + "/cmd_vel", 1 );
                 pub2_ = create_publisher<rosgame_msgs::msg::RosgamePoint>( "/" + code + "/goal_x_y", 10 );
                 sub1_ = create_subscription<sensor_msgs::msg::LaserScan>( "/" + code + "/laser_scan", 1, std::bind(&Warrior::process_laser_info, this, std::placeholders::_1));
                 sub2_ = create_subscription<std_msgs::msg::String>( "/" + code + "/scene_info", 1, std::bind(&Warrior::process_scene_info, this, std::placeholders::_1));
@@ -128,9 +128,10 @@ void Warrior::process_scene_info(const std_msgs::msg::String::SharedPtr msg)
 
 
     //RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
-    RCLCPP_INFO(this->get_logger(), "Players Positions Array:");
+    /*RCLCPP_INFO(this->get_logger(), "Players Positions Array:");
     for (const auto &skill_pos : players_pos_array)
     {   RCLCPP_INFO(this->get_logger(), "Enemigos: [X] = '%f', [Y] = '%f'", skill_pos[0], skill_pos[1]);  }
+       */
     // DEBUGGING
     /*
     RCLCPP_INFO(this->get_logger(), "Msg: '%s'", msg->data.c_str());
@@ -169,13 +170,36 @@ float Warrior::P_for_aiming(float angle){
     return P;
 }
 
+float Warrior::P_for_velocity(float angle){
+
+    const float V_MAX = 0.8;
+    const float V_MIN = 0.3;
 
 
-void Warrior::perform_movement(float angle)
+    const float K_REDUCTION = (V_MAX - V_MIN) / M_PI;
+
+    float abs_angle = fabsf(angle);
+
+    float P = V_MAX - K_REDUCTION * abs_angle;
+
+    if (P < V_MIN){
+        P = V_MIN;
+    }
+    
+    return P;
+}
+
+void Warrior::perform_movement(float angle, float distance, float front_distance)
 {
     rosgame_msgs::msg::RosgameTwist movement;
+    movement.vel.linear.x = P_for_velocity(angle);
 
-    movement.vel.linear.x = 0.2;
+    if (current_state == State::RETREATING && distance < 3 && battery < 70){
+        movement.vel.linear.x = 0.1;
+    }
+
+    if(front_distance < 0.3) movement.vel.linear.x = - 1.3;
+
     RCLCPP_INFO(this->get_logger(), "Angulo: %f", angle);
     movement.vel.angular.z = this->P_for_aiming(angle);
 
@@ -198,38 +222,64 @@ void Warrior::computing_angle(std::pair<float, float> target){
     double real_local_angle_diff = atan2(sin(local_angle_diff), cos(local_angle_diff));
 
 
-    this->perform_movement(real_local_angle_diff);
+    this->perform_movement(real_local_angle_diff, this->compute_euclidean_distance(x, pos_x, y, pos_y), 3);
 }
 
 
 void Warrior::most_density_of_resources(){
-    float best_density_score = -1.0f;
+    float best_safety_score = 1e9f; // Inicializamos con una puntuación muy alta (queremos MINIMIZAR)
     std::pair<float, float> best_resource_target = {0.0f, 0.0f};
-    float radius = 5.0f; //Radio para considerar que las cajas estan agrupadas
 
-    //Iteramos por cada recurso para evaluar su entorno
-    for (size_t i = 0; i < skills_pos_array.size(); ++i) {
-        float current_x = skills_pos_array[i][0];
-        float current_y = skills_pos_array[i][1];
-        int count = 0;
+    // Si no hay recursos, no hacemos nada
+    if (skills_pos_array.empty()) {
+        RCLCPP_WARN(this->get_logger(), "No hay recursos detectados. Buscando al azar...");
+        // Podrías añadir una lógica de movimiento aleatorio o patrullaje aquí
+        return;
+    }
 
-        //Comparamos esta caja con todas las demás
-        for (size_t j = 0; j < skills_pos_array.size(); ++j) {
-            float dist = compute_euclidean_distance(current_x, skills_pos_array[j][0], 
-                                                   current_y, skills_pos_array[j][1]);
-            if (dist <= radius) {
-                count++;
+    // Iteramos por cada recurso potencial
+    for (const auto& resource : skills_pos_array) {
+        float res_x = resource[0];
+        float res_y = resource[1];
+        
+        // --- 1. Calcular Distancia del Robot al Recurso (Peso 1) ---
+        float dist_robot_to_res = compute_euclidean_distance(pos_x, res_x, pos_y, res_y);
+
+        // --- 2. Calcular Distancia del Recurso al Cargador más cercano (Peso 2) ---
+        
+        float min_dist_res_to_charger = 1e9f; // Inicializamos alto
+        
+        // Buscamos el cargador más cercano a ESTE recurso
+        for (const auto& charger : chargers_pos_array) {
+            float dist_res_to_charger = compute_euclidean_distance(res_x, charger[0], res_y, charger[1]);
+            
+            if (dist_res_to_charger < min_dist_res_to_charger) {
+                min_dist_res_to_charger = dist_res_to_charger;
             }
         }
+        
+        // Si no hay cargadores visibles, la puntuación es mala (muy alta)
+        if (min_dist_res_to_charger == 1e9f) {
+            continue; 
+        }
 
-        float score = (float)count; //El 0.5 pondera la cercanía
+        // --- 3. Calcular la Puntuación de Seguridad (MINIMIZAR el score) ---
+        // Score = (Distancia al recurso) + (Peso * Distancia del recurso al cargador)
+        // Usamos un peso (ej. 0.5) para que no sea solo la distancia al cargador.
+        const float SAFETY_WEIGHT = 0.5f; 
+        float current_safety_score = dist_robot_to_res + (SAFETY_WEIGHT * min_dist_res_to_charger);
 
-        if (score + 1 > best_density_score) {
-            best_density_score = score;
-            best_resource_target = {current_x, current_y};
+        // Si la densidad es importante, puedes agregarla con un peso negativo:
+        // current_safety_score -= (float)density_count * 0.1f; 
+
+        if (current_safety_score < best_safety_score) {
+            best_safety_score = current_safety_score;
+            best_resource_target = {res_x, res_y};
         }
     }
-    RCLCPP_INFO(this->get_logger(), "Recurso objetivo [X]: %f , [Y]:%f", best_resource_target.first, best_resource_target.second);
+
+    RCLCPP_INFO(this->get_logger(), "Recurso objetivo (Seguridad) [X]: %f, [Y]:%f (Score: %f)", 
+                best_resource_target.first, best_resource_target.second, best_safety_score);
     this->computing_angle(best_resource_target);
 }
 
@@ -350,10 +400,12 @@ void Warrior::crashing_into_weakest_enemy(){
 
     if (found_vulnerable_target) {
         // Moverse al objetivo vulnerable
+        current_attack_target = target_coords;
         this->computing_angle(target_coords);
         
     } 
     else {
+        current_attack_target = {NAN, NAN};
         // Si no hay kills fáciles, abortamos el estado ENGAGING
         this->current_state = State::SEARCHING_RESOURCES;
     }
@@ -365,12 +417,16 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
         current_state = State::RETREATING;
     }
 
+    if(current_state != State::ENGAGING){
+        current_attack_target = {NAN, NAN};
+    }
+
     switch (current_state) {
         case State::SEARCHING_RESOURCES:
             RCLCPP_INFO(this->get_logger(), "Buscando recursos");
             this->most_density_of_resources();
             
-            if ((hammer_enabled || shield_enabled) && !players_pos_array.empty()) 
+            if ((hammer_enabled && shield_enabled) && !players_pos_array.empty()) 
                 current_state = State::ENGAGING;
             else if (enemy_with_advantage_near) 
                 current_state = State::SCAPING;
@@ -391,7 +447,7 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
             this->crashing_into_weakest_enemy();
 
             if (!hammer_enabled && !shield_enabled) {
-                current_state = (number_of_players_around < 2) ? State::ENGAGING : State::SEARCHING_RESOURCES;
+                current_state = (number_of_players_around < 2 || !enemy_with_advantage_near) ? State::ENGAGING : State::SEARCHING_RESOURCES;
             }
             break;
 
@@ -408,7 +464,7 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
 void Warrior::computing_data_for_FSM(){
     int number_of_players_around = 0;
     bool enemy_with_advantage_near = false;
-    const float DANGER_THRESHOLD = 3; // 3 metros, umbral de proximidad crítica
+    const float DANGER_THRESHOLD = 4;
 
     // Iteramos sobre la base de datos de enemigos trackeados
     for (const auto& pair : tracked_enemies) {
@@ -546,86 +602,102 @@ void Warrior::process_enemy_and_item_data() {
     this->last_skills_pos_array = skills_pos_array;
 }
 
-void Warrior::avoidance_maneuver(bool front_wall, bool left_wall, bool right_wall){
-    if(left_wall && front_wall && !right_wall){
-        this->perform_movement(-45*2*M_PI/360);
-    }else if(!left_wall && front_wall && right_wall){
-        this->perform_movement(45*2*M_PI/360);
-    }else if(front_wall && !front_wall && left_wall){
-        this->perform_movement(0);
-    }else if(!front_wall && front_wall && !left_wall){
-        this->perform_movement(120*2*M_PI/360); //Aqui deberia hacer algo para ir hacia atras
-    }
-
-}
 
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
-    RCLCPP_INFO(this->get_logger(), "Tamaño del array: %zu", msg->ranges.size());
-
+    // Obtención de parámetros del láser
     int array_size = msg->ranges.size();
-    double angle_increment = msg->angle_increment;
+    double angle_max = 120*2*M_PI/360;
+    double angle_min = -120*2*M_PI/360;
+    // Mejor cálculo del incremento usando el rango total
+    double angle_increment = (angle_max - angle_min) / array_size; 
 
-    if(autopilot_enabled){
-        RCLCPP_INFO(this->get_logger(), "Piloto automatico activado");
-    }
-    //Flags para el programa de movimiento
+    // --- PARÁMETROS DE SEGURIDAD Y EVASIÓN ---
+    // AJUSTE CLAVE: Reducimos el umbral de seguridad para que la FSM tenga más tiempo de actuar,
+    // y para evitar giros innecesarios lejos de las paredes.
+    const double SAFETY_THRESHOLD = 2; // Umbral de evasión de 70 cm
+    const double SIDE_DANGER_DIST = 0.6; // Distancia para que el lateral influya en el giro.
+
+    // Variables de Detección Reactiva
+    float min_front_dist = msg->range_max;
+    float min_right_dist = msg->range_max;
+    float min_left_dist = msg->range_max;
     
-    double front_distance = msg->range_max;
-    int izquierda = 0;
-    int centro = 0;
-    int derecha = 0;
+    // Las variables de heurística se mantienen para la compatibilidad del código, 
+    // pero ya no se usan en la lógica final de evasión.
+    float best_escape_score = -1.0f; 
+    float best_angle = 0.0f; 
 
-    bool front_wall = false;
-    bool left_wall = false;
-    bool right_wall = false;
-
-    //Mirar a los lados y al centro
-    for(int k = 86; k < 257; k++){
-        if(msg->ranges[k] < 0.8){
-            derecha++;
-            if(derecha>10){
-                right_wall = true;
-            }
+    // --- BUCLE DE CÁLCULO DE DISTANCIAS MÍNIMAS (Necesario para la Evasión Proporcional) ---
+    for (size_t i = 0; i < msg->ranges.size(); ++i) {
+        float distance = msg->ranges[i];
+        double current_angle = angle_min + (i * angle_increment);
+        
+        // CÁLCULO DE DISTANCIA FRONTAL (Trigger de Evasión)
+        if (fabsf(current_angle) <= 0.7) {
+            if (distance < min_front_dist) min_front_dist = distance;
+        }
+        
+        // CÁLCULO DE DISTANCIA LATERAL DERECHA (Repulsión)
+        else if (current_angle > 0.78 && current_angle <= 1.57) {
+            if (distance < min_right_dist) min_right_dist = distance;
+        }
+        
+        // CÁLCULO DE DISTANCIA LATERAL IZQUIERDA (Repulsión)
+        else if (current_angle >= -1.57 && current_angle < -0.78) {
+            if (distance < min_left_dist) min_left_dist = distance;
+        }
+        
+        // Mantenemos la heurística antigua para compatibilidad, aunque no se use en el control final
+        if (distance > 0.5 && fabsf(current_angle) < M_PI/2) {
+            float angle_normalized = fabsf(current_angle) / M_PI/2;
+            float escape_score = distance * (1.0f - 0.6 * angle_normalized);
             
-        }
-
-
-        if(msg->ranges[k+array_size/2 - 86 - 86] < 0.8){
-            centro++;
-            //RCLCPP_INFO(this->get_logger(), "Centro: %d", centro);
-            if(front_distance > msg->ranges[k+214]){
-                front_distance = msg->ranges[k+214];
-            }
-            if(centro>20){
-                front_wall = true;
-            }
-            
-        }
-
-        // El barrido es de 128 y como no me importan los obstaculos superados, pues el barrido es de -90 a 90
-        if(msg->ranges[k + array_size - 1 - 86 - 171] < 0.8){
-            izquierda++;
-            if(izquierda>10){
-                left_wall = true;
+            if (escape_score > best_escape_score) {
+                best_escape_score = escape_score;
+                best_angle = current_angle;
             }
         }
     }
 
-    this->process_enemy_and_item_data();
 
-    if (front_wall && (left_wall || right_wall)) {
-        RCLCPP_INFO(this->get_logger(), "Evitando");
-        this->avoidance_maneuver(front_wall, left_wall, right_wall); 
+    this->process_enemy_and_item_data(); 
+    
+    // --------------------------------------------------------------------------------
+    // --- 2. LÓGICA DE EVASIÓN REACTIVA PROPORCIONAL ---
+    // --------------------------------------------------------------------------------
+    
+    if (min_front_dist < SAFETY_THRESHOLD) {
+        
+        RCLCPP_WARN(this->get_logger(), "EVASIÓN PROPORCIONAL. Bloqueo a %f m", min_front_dist);
+        
+        float turn_command = 0.0f;
+        
+        // Calcular la repulsión lateral
+        float repulse_diff = 0.0f;
+        
+        // Solo aplicar la repulsión si la pared está cerca (< SIDE_DANGER_DIST)
+        if (min_left_dist < SIDE_DANGER_DIST || min_right_dist < SIDE_DANGER_DIST) {
+            // Repulsión Proporcional: Gira hacia el lado con más espacio
+            repulse_diff = min_right_dist - min_left_dist;
+        } else {
+            // Si las paredes laterales están lejos, hacemos un giro fijo hacia el lado más libre para salir del apuro
+            repulse_diff = (min_right_dist > min_left_dist) ? 1.0f : -1.0f; 
+        }
+
+        const float Kp_repulsion = 0.8f; 
+        turn_command = Kp_repulsion * repulse_diff;
+
+        // Publicar la maniobra (la velocidad será manejada por P_for_velocity y min_front_dist)
+        this->perform_movement(turn_command, 3.0, min_front_dist);
+        return; 
     }
-    else{
-        RCLCPP_INFO(this->get_logger(), "FSM");
-        this->computing_data_for_FSM();
-    }
+    
+    // --------------------------------------------------------------------------------
+    // --- 3. LÓGICA FINAL (FSM Normal) ---
+    // --------------------------------------------------------------------------------
+    
+    // Si no hay evasión ni seguimiento láser activo
+    RCLCPP_INFO(this->get_logger(), "FSM");
+    this->computing_data_for_FSM();
 }
-
-
-
-
-
-
