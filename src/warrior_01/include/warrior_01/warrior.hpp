@@ -37,6 +37,10 @@ public:
 
     std::pair<float, float> get_nearest_enemy_pos();
 
+    std::pair<float, float> current_resource_target = {
+        std::numeric_limits<float>::quiet_NaN(), 
+        std::numeric_limits<float>::quiet_NaN()
+    };
     void most_density_of_resources();
 
     void going_for_safest_resource_escape();

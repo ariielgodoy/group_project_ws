@@ -198,7 +198,7 @@ void Warrior::perform_movement(float angle, float distance, float front_distance
         movement.vel.linear.x = 0.1;
     }
 
-    if(front_distance < 0.3) movement.vel.linear.x = - 1.3;
+    if(front_distance < 0.6) movement.vel.linear.x = - 1.3;
 
     RCLCPP_INFO(this->get_logger(), "Angulo: %f", angle);
     movement.vel.angular.z = this->P_for_aiming(angle);
@@ -227,60 +227,55 @@ void Warrior::computing_angle(std::pair<float, float> target){
 
 
 void Warrior::most_density_of_resources(){
-    float best_safety_score = 1e9f; // Inicializamos con una puntuación muy alta (queremos MINIMIZAR)
-    std::pair<float, float> best_resource_target = {0.0f, 0.0f};
+    const float HYSTERESIS_MARGIN = 0.5f; 
+    
+    float best_score = 1e9f;
+    std::pair<float, float> new_best_resource_target = {0.0f, 0.0f}; 
 
-    // Si no hay recursos, no hacemos nada
     if (skills_pos_array.empty()) {
         RCLCPP_WARN(this->get_logger(), "No hay recursos detectados. Buscando al azar...");
-        // Podrías añadir una lógica de movimiento aleatorio o patrullaje aquí
-        return;
+        // Si no hay recursos, limpiamos el objetivo para el siguiente ciclo.
+        this->current_resource_target = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()};
+        return; 
     }
+    
+    // --- 1. APLICAR HISTERESIS AL OBJETIVO ACTUAL ---
+    
+    // Comprobación segura: ¿El objetivo actual está asignado (no es NAN)?
+    bool current_target_valid = !std::isnan(this->current_resource_target.first);
 
-    // Iteramos por cada recurso potencial
+    if (current_target_valid) { 
+        float dist_to_current_target = compute_euclidean_distance(pos_x, this->current_resource_target.first, 
+                                                                  pos_y, this->current_resource_target.second);
+        
+        // Damos una ventaja de 0.5m al objetivo actual para que sea más difícil cambiar.
+        best_score = dist_to_current_target - HYSTERESIS_MARGIN; 
+        new_best_resource_target = this->current_resource_target;
+    }
+    
+    // Si NO es válido, best_score sigue siendo 1e9f, por lo que cualquier recurso ganará.
+    
+    // --- 2. BÚSQUEDA DEL RECURSO MÁS CERCANO (VORAZ) ---
+    // ... (El resto del bucle de búsqueda) ...
     for (const auto& resource : skills_pos_array) {
         float res_x = resource[0];
         float res_y = resource[1];
-        
-        // --- 1. Calcular Distancia del Robot al Recurso (Peso 1) ---
-        float dist_robot_to_res = compute_euclidean_distance(pos_x, res_x, pos_y, res_y);
 
-        // --- 2. Calcular Distancia del Recurso al Cargador más cercano (Peso 2) ---
-        
-        float min_dist_res_to_charger = 1e9f; // Inicializamos alto
-        
-        // Buscamos el cargador más cercano a ESTE recurso
-        for (const auto& charger : chargers_pos_array) {
-            float dist_res_to_charger = compute_euclidean_distance(res_x, charger[0], res_y, charger[1]);
-            
-            if (dist_res_to_charger < min_dist_res_to_charger) {
-                min_dist_res_to_charger = dist_res_to_charger;
-            }
-        }
-        
-        // Si no hay cargadores visibles, la puntuación es mala (muy alta)
-        if (min_dist_res_to_charger == 1e9f) {
-            continue; 
-        }
+        float current_distance_score = compute_euclidean_distance(pos_x, res_x, pos_y, res_y);
 
-        // --- 3. Calcular la Puntuación de Seguridad (MINIMIZAR el score) ---
-        // Score = (Distancia al recurso) + (Peso * Distancia del recurso al cargador)
-        // Usamos un peso (ej. 0.5) para que no sea solo la distancia al cargador.
-        const float SAFETY_WEIGHT = 0.5f; 
-        float current_safety_score = dist_robot_to_res + (SAFETY_WEIGHT * min_dist_res_to_charger);
-
-        // Si la densidad es importante, puedes agregarla con un peso negativo:
-        // current_safety_score -= (float)density_count * 0.1f; 
-
-        if (current_safety_score < best_safety_score) {
-            best_safety_score = current_safety_score;
-            best_resource_target = {res_x, res_y};
+        if (current_distance_score < best_score) {
+            best_score = current_distance_score;
+            new_best_resource_target = {res_x, res_y};
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), "Recurso objetivo (Seguridad) [X]: %f, [Y]:%f (Score: %f)", 
-                best_resource_target.first, best_resource_target.second, best_safety_score);
-    this->computing_angle(best_resource_target);
+    // --- 3. ACTUALIZAR ESTADO PERSISTENTE Y MOVER ---
+    
+    this->current_resource_target = new_best_resource_target;
+
+    RCLCPP_INFO(this->get_logger(), "Recurso objetivo (Voraz con Histeresis) [X]: %f, [Y]:%f (Distancia efectiva: %f)", 
+                new_best_resource_target.first, new_best_resource_target.second, best_score);
+    this->computing_angle(new_best_resource_target);
 }
 
 
@@ -290,9 +285,11 @@ std::pair<float, float> Warrior::get_nearest_enemy_pos(){
     
     //Iteramos sobre todos los enemigos detectados
     for (const auto& enemy : players_pos_array) {
+        
         float enemy_x = enemy[0];
         float enemy_y = enemy[1];
 
+        RCLCPP_INFO(this->get_logger(), "enemigos [X]: %f, [Y]:%f", enemy_x, enemy_y);
         float dist = compute_euclidean_distance(pos_x, enemy_x, pos_y, enemy_y);
         
         if (dist < min_dist) {
@@ -333,14 +330,11 @@ void Warrior::going_for_safest_resource_escape() {
     }
 
     if (!found) {
-        // Calculamos el vector que va desde el enemigo hacia el robot
         float diff_x = pos_x - enemy.first;
         float diff_y = pos_y - enemy.second;
 
-        // Normalizamos y creamos un punto a 10 metros en esa dirección
         float magnitude = sqrt(diff_x * diff_x + diff_y * diff_y);
-        
-        // Evitar división por cero
+
         if (magnitude > 0.1f) {
             safest_resource_target.first = pos_x + (diff_x / magnitude) * 10.0f;
             safest_resource_target.second = pos_y + (diff_y / magnitude) * 10.0f;
@@ -371,13 +365,14 @@ void Warrior::go_for_nearest_charger(){
 
     RCLCPP_INFO(this->get_logger(), "Cargador objetivo [X]: %f , [Y]:%f", nearest_charger.first, nearest_charger.second);
     if (charger_found) {
+        current_attack_target = nearest_charger;
         this->computing_angle(nearest_charger);
     }
 }
 
 
 void Warrior::crashing_into_weakest_enemy(){
-    float min_dist_to_vulnerable = 9999.0f; // Buscamos la distancia más corta
+    float min_dist_to_vulnerable = 9999.0f;
     std::pair<float, float> target_coords = {0.0f, 0.0f};
     bool found_vulnerable_target = false;
 
@@ -389,7 +384,7 @@ void Warrior::crashing_into_weakest_enemy(){
             
             float dist = compute_euclidean_distance(pos_x, enemy.x, pos_y, enemy.y);
 
-            // Elegimos el desprotegido más cercano (criterio de selección)
+
             if (dist < min_dist_to_vulnerable) {
                 min_dist_to_vulnerable = dist;
                 target_coords = {enemy.x, enemy.y};
@@ -399,14 +394,12 @@ void Warrior::crashing_into_weakest_enemy(){
     }
 
     if (found_vulnerable_target) {
-        // Moverse al objetivo vulnerable
         current_attack_target = target_coords;
         this->computing_angle(target_coords);
         
     } 
     else {
         current_attack_target = {NAN, NAN};
-        // Si no hay kills fáciles, abortamos el estado ENGAGING
         this->current_state = State::SEARCHING_RESOURCES;
     }
 }
@@ -435,7 +428,7 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
             break;
         
         case State::SCAPING:
-            RCLCPP_INFO(this->get_logger(), "RUN NIGGA RUN");
+            RCLCPP_INFO(this->get_logger(), "Escape");
             this->going_for_safest_resource_escape(); 
             
             if (!enemy_with_advantage_near)
@@ -452,7 +445,7 @@ void Warrior::FSM(int number_of_players_around, bool enemy_with_advantage_near) 
             break;
 
         case State::RETREATING:
-            RCLCPP_INFO(this->get_logger(), "Ara welvo");
+            RCLCPP_INFO(this->get_logger(), "A cargar");
             this->go_for_nearest_charger();
             if (battery > 90.0)
                 current_state = State::SEARCHING_RESOURCES;
@@ -466,7 +459,6 @@ void Warrior::computing_data_for_FSM(){
     bool enemy_with_advantage_near = false;
     const float DANGER_THRESHOLD = 4;
 
-    // Iteramos sobre la base de datos de enemigos trackeados
     for (const auto& pair : tracked_enemies) {
         const EnemyInfo& enemy = pair.second;
         
@@ -474,16 +466,14 @@ void Warrior::computing_data_for_FSM(){
 
         if (dist < DANGER_THRESHOLD) {
             number_of_players_around++;
-            
-            // Si el enemigo esta cerca Y tiene has_powerup activo, peligro
+  
             if (enemy.has_powerup) {
                 enemy_with_advantage_near = true;
                 break;
             }
         }
     }
-    
-    // FSM para las decisiones del robot
+
     this->FSM(number_of_players_around, enemy_with_advantage_near);
 }
 
@@ -501,39 +491,32 @@ bool Warrior::is_item_present_now(
     float last_x = last_item_pos[0];
     float last_y = last_item_pos[1];
 
-    //Iteramos sobre todos los ítems en la lista actual
     for (const auto& current_pos : current_skills_list) {
         if (current_pos.size() < 2) continue; 
 
         float current_x = current_pos[0];
         float current_y = current_pos[1];
 
-        //Calculamos la distancia euclidea entre la posicion anterior y la actual
         float dist = compute_euclidean_distance(last_x, current_x, last_y, current_y);
 
-        //Si la distancia es menor que la tolerancia, el item persiste en la misma ubicación
         if (dist < POSITION_TOLERANCE) {
             return true; 
         }
     }
 
-    return false; //El item ya no se encuentra en esa posición (fue recogido)
+    return false;
 }
 
 
 void Warrior::process_enemy_and_item_data() {
     double now = this->get_clock()->now().seconds();
-    float max_association_dist = 1.0f; // Distancia máxima para considerar el mismo enemigo
-    float pickup_threshold = 0.8f;      // Distancia máxima para inferir la recogida
-
-    // --- A. LIMPIEZA DE ENEMIGOS ELIMINADOS y EXPIRACIÓN DE POWER-UPS ---
+    float max_association_dist = 1.0f;
+    float pickup_threshold = 0.8f;
     
-    // Paso A1: Eliminar enemigos no vistos (los que han sido eliminados)
     for (auto it = tracked_enemies.begin(); it != tracked_enemies.end(); ) {
-        if (now - it->second.last_seen > 1.0) { // Si no lo hemos visto en 1.0s, lo borramos
+        if (now - it->second.last_seen > 1.0) {
              it = tracked_enemies.erase(it);
         } else {
-            // Paso A2: Quitar power-ups caducados
             if (it->second.has_powerup && now > it->second.powerup_expiry) {
                 it->second.has_powerup = false;
             }
@@ -541,9 +524,7 @@ void Warrior::process_enemy_and_item_data() {
         }
     }
 
-    // --- B. RASTREO (Tracking) y Actualización de Posición ---
-    
-    // Lista de power-ups del ciclo ANTERIOR (requiere que guardes skills_pos_array de la vez anterior)
+
     const auto& last_skills = this->last_skills_pos_array; 
     
     for (const auto& pos : players_pos_array) {
@@ -566,7 +547,6 @@ void Warrior::process_enemy_and_item_data() {
             tracked_enemies[associated_id].y = new_y;
             tracked_enemies[associated_id].last_seen = now;
         } else {
-            // Nuevo enemigo detectado
             EnemyInfo new_enemy;
             new_enemy.id = next_enemy_id++;
             new_enemy.x = new_x;
@@ -575,20 +555,16 @@ void Warrior::process_enemy_and_item_data() {
             tracked_enemies[new_enemy.id] = new_enemy;
             associated_id = new_enemy.id;
         }
-        
-        // Solo intentamos inferir si el enemigo NO tiene ya un power-up activo
+
         if (associated_id != -1 && !tracked_enemies[associated_id].has_powerup) {
             
-            // Comparar con el estado anterior de skills_pos_array para inferir recolección
             for (const auto& last_skill_pos : last_skills) {
-                
-                // Si este ítem estaba AHORA y no está en la lista actual, fue recogido
+
                 if (!is_item_present_now(last_skill_pos, skills_pos_array)) {
                     
                     float dist_to_pickup_spot = compute_euclidean_distance(new_x, last_skill_pos[0], new_y, last_skill_pos[1]);
                     
                     if (dist_to_pickup_spot < pickup_threshold) {
-                        // Inferencia exitosa: El enemigo recogio ALGO.
                         tracked_enemies[associated_id].has_powerup = true;
                         tracked_enemies[associated_id].powerup_expiry = now + POWERUP_DURATION; 
 
@@ -605,99 +581,110 @@ void Warrior::process_enemy_and_item_data() {
 
 void Warrior::process_laser_info(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
-    // Obtención de parámetros del láser
     int array_size = msg->ranges.size();
     double angle_max = 120*2*M_PI/360;
     double angle_min = -120*2*M_PI/360;
-    // Mejor cálculo del incremento usando el rango total
     double angle_increment = (angle_max - angle_min) / array_size; 
 
-    // --- PARÁMETROS DE SEGURIDAD Y EVASIÓN ---
-    // AJUSTE CLAVE: Reducimos el umbral de seguridad para que la FSM tenga más tiempo de actuar,
-    // y para evitar giros innecesarios lejos de las paredes.
-    const double SAFETY_THRESHOLD = 2; // Umbral de evasión de 70 cm
-    const double SIDE_DANGER_DIST = 0.6; // Distancia para que el lateral influya en el giro.
-
-    // Variables de Detección Reactiva
+    const double SAFETY_THRESHOLD = 2;
+    const double SIDE_DANGER_DIST = 0.8; 
+    const float ASSOCIATION_TOLERANCE = 0.8f;
+    
     float min_front_dist = msg->range_max;
     float min_right_dist = msg->range_max;
     float min_left_dist = msg->range_max;
     
-    // Las variables de heurística se mantienen para la compatibilidad del código, 
-    // pero ya no se usan en la lógica final de evasión.
-    float best_escape_score = -1.0f; 
-    float best_angle = 0.0f; 
-
-    // --- BUCLE DE CÁLCULO DE DISTANCIAS MÍNIMAS (Necesario para la Evasión Proporcional) ---
     for (size_t i = 0; i < msg->ranges.size(); ++i) {
         float distance = msg->ranges[i];
         double current_angle = angle_min + (i * angle_increment);
         
-        // CÁLCULO DE DISTANCIA FRONTAL (Trigger de Evasión)
         if (fabsf(current_angle) <= 0.7) {
             if (distance < min_front_dist) min_front_dist = distance;
         }
         
-        // CÁLCULO DE DISTANCIA LATERAL DERECHA (Repulsión)
         else if (current_angle > 0.78 && current_angle <= 1.57) {
             if (distance < min_right_dist) min_right_dist = distance;
         }
         
-        // CÁLCULO DE DISTANCIA LATERAL IZQUIERDA (Repulsión)
         else if (current_angle >= -1.57 && current_angle < -0.78) {
             if (distance < min_left_dist) min_left_dist = distance;
         }
-        
-        // Mantenemos la heurística antigua para compatibilidad, aunque no se use en el control final
-        if (distance > 0.5 && fabsf(current_angle) < M_PI/2) {
-            float angle_normalized = fabsf(current_angle) / M_PI/2;
-            float escape_score = distance * (1.0f - 0.6 * angle_normalized);
-            
-            if (escape_score > best_escape_score) {
-                best_escape_score = escape_score;
-                best_angle = current_angle;
-            }
-        }
     }
 
-
     this->process_enemy_and_item_data(); 
-    
-    // --------------------------------------------------------------------------------
-    // --- 2. LÓGICA DE EVASIÓN REACTIVA PROPORCIONAL ---
-    // --------------------------------------------------------------------------------
-    
-    if (min_front_dist < SAFETY_THRESHOLD) {
+
+    bool target_is_assigned = !std::isnan(current_attack_target.first);
+    float precise_angle = NAN;
+    float laser_dist_to_target = NAN;
+    bool is_target_in_front = false;
+
+    if (current_state == State::ENGAGING && target_is_assigned && compute_euclidean_distance(pos_x, current_attack_target.first, pos_y, current_attack_target.second)) {
         
+        if (current_attack_target.first != 0.0f || current_attack_target.second != 0.0f) {
+            
+            float dist_global = compute_euclidean_distance(pos_x, current_attack_target.first, pos_y, current_attack_target.second);
+            double target_global_angle = atan2(current_attack_target.second - pos_y, current_attack_target.first - pos_x);
+            double target_local_angle = target_global_angle - gamma;
+            target_local_angle = atan2(sin(target_local_angle), cos(target_local_angle));
+            
+            int target_index = (int)round((target_local_angle - angle_min) / angle_increment);
+            
+            if (target_index >= 0 && target_index < msg->ranges.size()) {
+                float laser_dist = msg->ranges[target_index];
+                
+                if (laser_dist > 0.1f && fabsf(laser_dist - dist_global) < ASSOCIATION_TOLERANCE) {
+                    laser_dist_to_target = laser_dist;
+                    precise_angle = target_local_angle;
+                    
+                    is_target_in_front = (laser_dist_to_target < SAFETY_THRESHOLD);
+                }
+            }
+        }
+        
+        if (!std::isnan(precise_angle)) {
+            RCLCPP_INFO(this->get_logger(), "SEGUIMIENTO LÁSER ACTIVO. Cierre en: %f m", laser_dist_to_target);
+
+            this->perform_movement(precise_angle, 3.0f, laser_dist_to_target);
+        }
+    }
+    
+
+    if (min_front_dist < SAFETY_THRESHOLD) {
+
+        if (current_state == State::ENGAGING && is_target_in_front) {
+            RCLCPP_INFO(this->get_logger(), "IGNORANDO OBSTÁCULO: ES EL ENEMIGO PARA COLISIÓN.");
+            RCLCPP_INFO(this->get_logger(), "FSM");
+            this->computing_data_for_FSM();
+            return; 
+        }
+
         RCLCPP_WARN(this->get_logger(), "EVASIÓN PROPORCIONAL. Bloqueo a %f m", min_front_dist);
         
         float turn_command = 0.0f;
-        
-        // Calcular la repulsión lateral
         float repulse_diff = 0.0f;
         
-        // Solo aplicar la repulsión si la pared está cerca (< SIDE_DANGER_DIST)
         if (min_left_dist < SIDE_DANGER_DIST || min_right_dist < SIDE_DANGER_DIST) {
-            // Repulsión Proporcional: Gira hacia el lado con más espacio
             repulse_diff = min_right_dist - min_left_dist;
         } else {
-            // Si las paredes laterales están lejos, hacemos un giro fijo hacia el lado más libre para salir del apuro
             repulse_diff = (min_right_dist > min_left_dist) ? 1.0f : -1.0f; 
         }
 
-        const float Kp_repulsion = 0.8f; 
-        turn_command = Kp_repulsion * repulse_diff;
+        const float Kp_repulsion = 0.8;
+        if(fabs(turn_command) < M_PI/2){
+            turn_command = Kp_repulsion * repulse_diff;
+        }else if(turn_command>0){
+            turn_command = M_PI/2;
+        }else if(turn_command<0){
+            turn_command = -M_PI/2;
+        }
 
-        // Publicar la maniobra (la velocidad será manejada por P_for_velocity y min_front_dist)
         this->perform_movement(turn_command, 3.0, min_front_dist);
+        RCLCPP_INFO(this->get_logger(), "FSM");
+        this->computing_data_for_FSM();
         return; 
     }
     
-    // --------------------------------------------------------------------------------
-    // --- 3. LÓGICA FINAL (FSM Normal) ---
-    // --------------------------------------------------------------------------------
-    
-    // Si no hay evasión ni seguimiento láser activo
+
     RCLCPP_INFO(this->get_logger(), "FSM");
     this->computing_data_for_FSM();
 }
